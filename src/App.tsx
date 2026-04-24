@@ -1,13 +1,14 @@
 import { useState, useEffect } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { auth } from './lib/firebase';
-import { getWorkerProfile } from './services/firebaseService';
+import { getWorkerProfile, markJobPremium } from './services/firebaseService';
 import Navbar from './layout/Navbar';
 import Landing from './screens/Landing';
 import WorkerRegistration from './screens/WorkerRegistration';
 import WorkerDashboard from './screens/WorkerDashboard';
 import CustomerDashboard from './screens/CustomerDashboard';
 import { Loader2 } from 'lucide-react';
+import { Toaster, toast } from 'react-hot-toast';
 
 type Screen = 'landing' | 'worker-reg' | 'worker-dash' | 'customer-dash';
 
@@ -15,9 +16,26 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [screen, setScreen] = useState<Screen>('landing');
-  const [workerProfile, setWorkerProfile] = useState<any>(null);
+  const [workerProfile, setWorkerProfile] = useState<unknown>(null);
 
   useEffect(() => {
+    // Check for Stripe redirect
+    const urlParams = new URLSearchParams(window.location.search);
+    const sessionId = urlParams.get('session_id');
+    const jobId = urlParams.get('job_id');
+    
+    if (sessionId && jobId) {
+      // Mark job as premium
+      markJobPremium(jobId)
+        .then(() => {
+          toast.success('تم تفعيل الطلب المميز بنجاح!');
+          window.history.replaceState({}, document.title, window.location.pathname);
+        })
+        .catch(() => {
+          toast.error('حدث خطأ أثناء تفعيل الطلب المميز');
+        });
+    }
+
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
       setUser(u);
       if (u) {
@@ -46,6 +64,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-sand">
+      <Toaster position="top-center" toastOptions={{ style: { background: '#2D241E', color: '#fff', borderRadius: '20px' } }} />
       <Navbar user={user} onNavigate={(s) => navigate(s as Screen)} />
       
       <main className="max-w-7xl mx-auto">

@@ -21,6 +21,7 @@
         "rating": { "type": "number" },
         "reviewsCount": { "type": "integer" },
         "isAvailable": { "type": "boolean" },
+        "isBarakaActive": { "type": "boolean" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["userId", "name", "craftId"]
@@ -43,6 +44,9 @@
         "status": { "type": "string", "enum": ["open", "assigned", "completed", "cancelled"] },
         "workerId": { "type": "string" },
         "urgency": { "type": "string", "enum": ["normal", "emergency"] },
+        "isPremium": { "type": "boolean" },
+        "customerConfirmedCompletion": { "type": "boolean" },
+        "workerConfirmedCompletion": { "type": "boolean" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["customerId", "craftId", "status"]
@@ -58,12 +62,29 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["jobId", "senderId", "voiceUrl"]
+    },
+    "Review": {
+      "title": "Review",
+      "description": "A customer review for a worker.",
+      "type": "object",
+      "properties": {
+        "customerId": { "type": "string" },
+        "jobId": { "type": "string" },
+        "voiceReviewUrl": { "type": "string" },
+        "rating": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["customerId", "jobId", "rating"]
     }
   },
   "firestore": {
     "/workers/{workerId}": {
       "schema": "Worker",
       "description": "Individual worker profiles."
+    },
+    "/workers/{workerId}/reviews/{reviewId}": {
+      "schema": "Review",
+      "description": "Audio reviews left by customers for this worker."
     },
     "/jobs/{jobId}": {
       "schema": "JobRequest",

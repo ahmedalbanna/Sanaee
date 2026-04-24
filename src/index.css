@@ -2,10 +2,12 @@
 @import "tailwindcss";
 
 @theme {
-  --color-primary: #D97706;
-  --color-secondary: #1E293B;
-  --color-sand: #FDFCF6;
-  --color-gold: #FACC15;
+  --color-primary: #D35400;
+  --color-secondary: #2D241E;
+  --color-sand: #F5EFE6;
+  --color-gold: #D4AF37;
+  --color-border: #E8E2D6;
+  --color-muted: #8B7E66;
   
   --font-sans: "Inter", "Cairo", ui-sans-serif, system-ui, sans-serif;
   --font-serif: "Amiri", "Georgia", serif;
@@ -13,7 +15,7 @@
 
 @layer base {
   body {
-    @apply bg-sand text-secondary font-sans;
+    @apply bg-[#FDFBF7] text-secondary font-sans;
     direction: rtl;
   }
   

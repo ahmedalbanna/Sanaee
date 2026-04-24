@@ -11,8 +11,7 @@ export default function CraftSelector({ selectedId, onSelect }: CraftSelectorPro
   return (
     <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 w-full max-w-2xl mx-auto">
       {CRAFT_TYPES.map((craft) => {
-        // @ts-expect-error - dynamic icon lookup
-        const IconComponent = Icons[craft.icon] || Icons.Hammer;
+        const IconComponent = (Icons as any)[craft.icon] || Icons.Hammer;
         const isSelected = selectedId === craft.id;
 
         return (
