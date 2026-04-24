@@ -1,0 +1,77 @@
+{
+  "entities": {
+    "Worker": {
+      "title": "Worker",
+      "description": "A professional craftsman offering services.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Firebase Auth UID" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "voiceProfileUrl": { "type": "string", "description": "URL to the 30s audio intro" },
+        "craftId": { "type": "string", "description": "ID of the craft from constants" },
+        "dailyRate": { "type": "integer" },
+        "location": {
+          "type": "object",
+          "properties": {
+            "city": { "type": "string" },
+            "district": { "type": "string" }
+          }
+        },
+        "rating": { "type": "number" },
+        "reviewsCount": { "type": "integer" },
+        "isAvailable": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "name", "craftId"]
+    },
+    "JobRequest": {
+      "title": "Job Request",
+      "description": "A request for a craft service from a customer.",
+      "type": "object",
+      "properties": {
+        "customerId": { "type": "string" },
+        "voiceRequestUrl": { "type": "string" },
+        "craftId": { "type": "string" },
+        "location": {
+          "type": "object",
+          "properties": {
+            "city": { "type": "string" },
+            "district": { "type": "string" }
+          }
+        },
+        "status": { "type": "string", "enum": ["open", "assigned", "completed", "cancelled"] },
+        "workerId": { "type": "string" },
+        "urgency": { "type": "string", "enum": ["normal", "emergency"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["customerId", "craftId", "status"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "Voice negotiation messages between worker and customer.",
+      "type": "object",
+      "properties": {
+        "jobId": { "type": "string" },
+        "senderId": { "type": "string" },
+        "voiceUrl": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["jobId", "senderId", "voiceUrl"]
+    }
+  },
+  "firestore": {
+    "/workers/{workerId}": {
+      "schema": "Worker",
+      "description": "Individual worker profiles."
+    },
+    "/jobs/{jobId}": {
+      "schema": "JobRequest",
+      "description": "Service requests."
+    },
+    "/jobs/{jobId}/messages/{messageId}": {
+      "schema": "Message",
+      "description": "Negotiation history for a job."
+    }
+  }
+}

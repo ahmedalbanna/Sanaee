@@ -1,0 +1,6 @@
+{
+  "name": "Sanaee | صنايعي",
+  "description": "منصة يمنية مبتكرة تربط أصحاب المهن اليدوية بالزبائن عبر الرسائل الصوتية والتقييم المسموع، مصممة للسهولة والوصول.",
+  "requestFramePermissions": ["microphone", "geolocation"],
+  "majorCapabilities": ["voice_interaction", "real_time_matching", "worker_directory"]
+}

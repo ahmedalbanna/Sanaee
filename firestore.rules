@@ -1,0 +1,72 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    function isSignedIn() { return request.auth != null; }
+    function isVerified() { return isSignedIn() && request.auth.token.email_verified == true; }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isOwner(uid) { return isSignedIn() && request.auth.uid == uid; }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+
+    // --- Validation Blueprints ---
+    function isValidWorker(data) {
+      return data.keys().hasAll(['userId', 'name', 'craftId', 'createdAt']) &&
+             data.userId == request.auth.uid &&
+             data.name is string && data.name.size() <= 100 &&
+             data.craftId is string && data.craftId.size() <= 50 &&
+             data.createdAt == request.time &&
+             (data.get('phone', '') is string && data.get('phone', '').size() <= 20) &&
+             (data.get('dailyRate', 0) is int) &&
+             (data.get('rating', 0) is number);
+    }
+
+    function isValidJob(data) {
+      return data.keys().hasAll(['customerId', 'craftId', 'status', 'createdAt']) &&
+             data.customerId == request.auth.uid &&
+             data.craftId is string &&
+             data.status in ['open', 'assigned', 'completed', 'cancelled'] &&
+             data.createdAt == request.time;
+    }
+
+    // --- Collections ---
+
+    // 1. Workers
+    match /workers/{workerId} {
+      allow read: if isSignedIn();
+      allow create: if isVerified() && isValidWorker(incoming()) && isValidId(workerId);
+      allow update: if isOwner(existing().userId) && isValidWorker(incoming()) &&
+                    incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'craftId', 'dailyRate', 'location', 'isAvailable']);
+    }
+
+    // 2. Jobs
+    match /jobs/{jobId} {
+      allow list: if isSignedIn() && (resource.data.customerId == request.auth.uid || resource.data.status == 'open');
+      allow get: if isSignedIn();
+      allow create: if isVerified() && isValidJob(incoming()) && isValidId(jobId);
+      allow update: if isSignedIn() && (
+        // Case: Customer updates their job (cancel/complete)
+        (isOwner(existing().customerId) && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'workerId'])) ||
+        // Case: Worker assigns themselves to an open job
+        (isVerified() && existing().status == 'open' && incoming().status == 'assigned' && 
+         incoming().workerId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'workerId']))
+      );
+    }
+
+    // 3. Messages (Subcollection of Jobs)
+    match /jobs/{jobId}/messages/{messageId} {
+      function canAccessJob() {
+        let job = get(/databases/$(database)/documents/jobs/$(jobId)).data;
+        return isOwner(job.customerId) || isOwner(job.workerId);
+      }
+      
+      allow read: if canAccessJob();
+      allow create: if canAccessJob() && incoming().senderId == request.auth.uid && incoming().createdAt == request.time;
+    }
+  }
+}
