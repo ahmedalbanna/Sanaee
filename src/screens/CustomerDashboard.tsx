@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Plus, Disc, MapPin, Clock, Hammer, X, Star, CheckCircle } from 'lucide-react';
+import { Plus, Disc, MapPin, Hammer, X, Star, CheckCircle } from 'lucide-react';
 import VoiceRecorder from '../components/VoiceRecorder';
 import CraftSelector from '../components/CraftSelector';
-import { createJobRequest, uploadAudio, subscribeToJobsAll, confirmJobCompletion, getWorkers, addReview, Job } from '../services/firebaseService';
+import { createJobRequest, uploadAudio, subscribeToJobsAll, confirmJobCompletion, getWorkers, addReview, Job, WorkerProfile } from '../services/firebaseService';
 import { auth } from '../lib/firebase';
 import toast from 'react-hot-toast';
 
@@ -13,7 +13,7 @@ export default function CustomerDashboard() {
   const [reviewWorkerId, setReviewWorkerId] = useState<string | null>(null);
   const [reviewRating, setReviewRating] = useState(5);
   const [jobs, setJobs] = useState<Job[]>([]);
-  const [workers, setWorkers] = useState<any[]>([]);
+  const [workers, setWorkers] = useState<WorkerProfile[]>([]);
   const [postData, setPostData] = useState({
     craftId: '',
     voiceUrl: '',

@@ -81,6 +81,8 @@ export interface WorkerProfile {
   name?: string;
   craftId?: string;
   isBarakaActive?: boolean;
+  isAvailable?: boolean;
+  dailyRate?: number;
   rating?: number;
   reviewsCount?: number;
   voiceProfileUrl?: string;
@@ -263,7 +265,7 @@ export interface Job {
   voiceRequestUrl?: string;
   customerConfirmedCompletion?: boolean;
   workerConfirmedCompletion?: boolean;
-  createdAt?: any;
+  createdAt?: unknown;
 }
 
 export const subscribeToJobsAll = (callback: (jobs: Job[]) => void) => {

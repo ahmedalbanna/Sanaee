@@ -11,7 +11,7 @@ export default function CraftSelector({ selectedId, onSelect }: CraftSelectorPro
   return (
     <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 w-full max-w-2xl mx-auto">
       {CRAFT_TYPES.map((craft) => {
-        const IconComponent = (Icons as any)[craft.icon] || Icons.Hammer;
+        const IconComponent = (Icons as unknown as Record<string, React.ComponentType<{ size?: number; strokeWidth?: number }>>)[craft.icon] || Icons.Hammer;
         const isSelected = selectedId === craft.id;
 
         return (
