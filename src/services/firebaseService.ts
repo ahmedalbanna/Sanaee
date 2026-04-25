@@ -263,10 +263,26 @@ export interface Job {
   isPremium?: boolean;
   urgency?: string;
   voiceRequestUrl?: string;
+  additionalVoiceUrls?: string[];
   customerConfirmedCompletion?: boolean;
   workerConfirmedCompletion?: boolean;
   createdAt?: unknown;
 }
+
+export const addAdditionalVoiceToJob = async (jobId: string, url: string) => {
+  const path = `jobs/${jobId}`;
+  try {
+    const jobRef = doc(db, 'jobs', jobId);
+    const snap = await getDoc(jobRef);
+    if (!snap.exists()) return;
+    const currentUrls = snap.data().additionalVoiceUrls || [];
+    await updateDoc(jobRef, {
+      additionalVoiceUrls: [...currentUrls, url]
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+};
 
 export const subscribeToJobsAll = (callback: (jobs: Job[]) => void) => {
   const path = 'jobs';

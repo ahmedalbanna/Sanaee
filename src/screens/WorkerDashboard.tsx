@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Hammer, MapPin, Clock, MessageSquare, Info, Heart, CheckCircle, Star } from 'lucide-react';
 import { subscribeToJobsAll, updateWorkerBaraka, confirmJobCompletion, getWorkerReviews, assignWorkerToJob, Job, WorkerProfile } from '../services/firebaseService';
@@ -10,6 +10,39 @@ export default function WorkerDashboard({ profile }: { profile: WorkerProfile })
   const [reviews, setReviews] = useState<unknown[]>([]);
   const [activeTab, setActiveTab] = useState<'feed' | 'mine' | 'profile'>('feed');
   const [isBaraka, setIsBaraka] = useState(profile?.isBarakaActive || false);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const seenJobsRef = useRef<Set<string>>(new Set());
+
+  const playAlertSound = () => {
+    if (!audioContextRef.current) {
+      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+    }
+    const ctx = audioContextRef.current;
+    if (ctx.state === 'suspended') ctx.resume();
+
+    const playBeep = (startTime: number) => {
+      const osc = ctx.createOscillator();
+      const gainNode = ctx.createGain();
+      
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(800, startTime);
+      osc.frequency.exponentialRampToValueAtTime(1200, startTime + 0.1);
+      
+      gainNode.gain.setValueAtTime(0.5, startTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, startTime + 0.3);
+      
+      osc.connect(gainNode);
+      gainNode.connect(ctx.destination);
+      
+      osc.start(startTime);
+      osc.stop(startTime + 0.3);
+    };
+
+    const now = ctx.currentTime;
+    playBeep(now);
+    playBeep(now + 0.4);
+    playBeep(now + 0.8);
+  };
 
   useEffect(() => {
     const unsub = subscribeToJobsAll((allJobs) => {
@@ -17,9 +50,36 @@ export default function WorkerDashboard({ profile }: { profile: WorkerProfile })
         (j.status === 'open' && j.craftId === profile.craftId) || 
         j.workerId === auth.currentUser?.uid
       );
+      
+      let hasNewEmergency = false;
+      relevant.forEach(job => {
+        if (!seenJobsRef.current.has(job.id!)) {
+           seenJobsRef.current.add(job.id!);
+           // Only alert for open emergency jobs that we haven't seen yet
+           if (job.urgency === 'emergency' && job.status === 'open') {
+             hasNewEmergency = true;
+           }
+        }
+      });
+      
+      if (hasNewEmergency) {
+        playAlertSound();
+        toast('🚨 طلب عاجل جديد!', {
+          duration: 5000,
+          style: {
+            borderRadius: '10px',
+            background: '#EF4444',
+            color: '#fff',
+            fontWeight: 'bold',
+          },
+        });
+      }
+
       relevant.sort((a, b) => {
         if (a.isPremium && !b.isPremium) return -1;
         if (!a.isPremium && b.isPremium) return 1;
+        if (a.urgency === 'emergency' && b.urgency !== 'emergency') return -1;
+        if (a.urgency !== 'emergency' && b.urgency === 'emergency') return 1;
         return 0;
       });
       setJobs(relevant);
@@ -49,9 +109,11 @@ export default function WorkerDashboard({ profile }: { profile: WorkerProfile })
 
   const handleAcceptJob = async (jobId: string) => {
     if (!jobId) return;
+    const confirmAsk = window.confirm("هل أنت متأكد من رغبتك في استلام وعمل هذا الطلب؟");
+    if (!confirmAsk) return;
     try {
       await assignWorkerToJob(jobId);
-      toast.success('تم تخصيص الطلب لك بنجاح!');
+      toast.success('تم تخصيص الطلب لك بنجاح، يمكنك الآن البدء بالعمل!');
       setActiveTab('mine');
     } catch {
       toast.error('حدث خطأ');
@@ -134,14 +196,20 @@ export default function WorkerDashboard({ profile }: { profile: WorkerProfile })
                       <MessageSquare size={18} />
                       اسمع الطلب:
                     </p>
-                    <div className="bg-sand p-6 rounded-3xl border-2 border-primary/5">
+                    <div className="bg-sand p-6 rounded-3xl border-2 border-primary/5 space-y-4">
                       <audio src={job.voiceRequestUrl} controls className="w-full" />
+                      {job.additionalVoiceUrls?.map((url, i) => (
+                        <div key={i} className="pt-2 border-t border-primary/10">
+                          <span className="text-xs text-muted font-bold block mb-1">تفاصيل إضافية #{i + 1}</span>
+                          <audio src={url} controls className="w-full" />
+                        </div>
+                      ))}
                     </div>
                   </div>
 
                   <div className="mt-auto pt-6 border-t border-sand flex gap-4">
                     <button 
-                      onClick={() => handleAcceptJob(job.id)}
+                      onClick={() => handleAcceptJob(job.id!)}
                       className="flex-grow bg-primary text-white py-4 rounded-2xl font-black text-lg hover:bg-primary/90 transition-all shadow-md active:scale-95"
                     >
                       أنا جاهز
@@ -164,10 +232,19 @@ export default function WorkerDashboard({ profile }: { profile: WorkerProfile })
                       {job.status === 'completed' ? 'مكتمل' : 'قيد العمل'}
                     </span>
                   </div>
-                  <audio src={job.voiceRequestUrl} controls className="w-full mb-6" />
+                  
+                  <div className="bg-sand p-4 rounded-2xl mb-6 space-y-4">
+                    <audio src={job.voiceRequestUrl} controls className="w-full" />
+                    {job.additionalVoiceUrls?.map((url, i) => (
+                      <div key={i} className="pt-2 border-t border-primary/10">
+                        <span className="text-xs text-muted font-bold block mb-1">تفاصيل إضافية #{i + 1}</span>
+                        <audio src={url} controls className="w-full" />
+                      </div>
+                    ))}
+                  </div>
                   
                   {job.status === 'assigned' && !job.workerConfirmedCompletion && (
-                    <button onClick={() => handleConfirmCompletion(job.id)} className="w-full bg-green-500 text-white py-3 rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-green-600 transition-colors">
+                    <button onClick={() => handleConfirmCompletion(job.id!)} className="w-full bg-green-500 text-white py-3 rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-green-600 transition-colors">
                       <CheckCircle size={20} />
                       أكد إنجاز العمل
                     </button>

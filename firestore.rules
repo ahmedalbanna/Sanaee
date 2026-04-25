@@ -68,8 +68,8 @@ service cloud.firestore {
       allow get: if isSignedIn();
       allow create: if isVerified() && isValidJob(incoming()) && isValidId(jobId);
       allow update: if isSignedIn() && (
-        // Case: Customer updates their job (cancel/complete/confirm)
-        (isOwner(existing().customerId) && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'workerId', 'customerConfirmedCompletion', 'isPremium'])) ||
+        // Case: Customer updates their job (cancel/complete/confirm/add voice)
+        (isOwner(existing().customerId) && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'workerId', 'customerConfirmedCompletion', 'isPremium', 'additionalVoiceUrls'])) ||
         // Case: Worker assigns themselves to an open job or confirms completion
         (isVerified() && (
           (existing().status == 'open' && incoming().status == 'assigned' && incoming().workerId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'workerId'])) ||

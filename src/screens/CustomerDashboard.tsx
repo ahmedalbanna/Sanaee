@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Plus, Disc, MapPin, Hammer, X, Star, CheckCircle } from 'lucide-react';
+import { Plus, Disc, MapPin, Hammer, X, Star, CheckCircle, Mic } from 'lucide-react';
 import VoiceRecorder from '../components/VoiceRecorder';
 import CraftSelector from '../components/CraftSelector';
-import { createJobRequest, uploadAudio, subscribeToJobsAll, confirmJobCompletion, getWorkers, addReview, Job, WorkerProfile } from '../services/firebaseService';
+import { createJobRequest, uploadAudio, subscribeToJobsAll, confirmJobCompletion, getWorkers, addReview, Job, WorkerProfile, addAdditionalVoiceToJob } from '../services/firebaseService';
 import { auth } from '../lib/firebase';
 import toast from 'react-hot-toast';
 
@@ -11,6 +11,7 @@ export default function CustomerDashboard() {
   const [showPostModal, setShowPostModal] = useState(false);
   const [reviewJobId, setReviewJobId] = useState<string | null>(null);
   const [reviewWorkerId, setReviewWorkerId] = useState<string | null>(null);
+  const [addVoiceJobId, setAddVoiceJobId] = useState<string | null>(null);
   const [reviewRating, setReviewRating] = useState(5);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [workers, setWorkers] = useState<WorkerProfile[]>([]);
@@ -110,6 +111,21 @@ export default function CustomerDashboard() {
       toast.success('تم إضافة التقييم!');
       setReviewJobId(null);
       setReviewWorkerId(null);
+    } catch {
+      toast.error('حدث خطأ');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAppendedVoice = async (blob: Blob) => {
+    if (!addVoiceJobId) return;
+    try {
+      setLoading(true);
+      const url = await uploadAudio(blob, 'job_requests');
+      await addAdditionalVoiceToJob(addVoiceJobId, url);
+      toast.success('تمت إضافة الرسالة الصوتية بنجاح');
+      setAddVoiceJobId(null);
     } catch {
       toast.error('حدث خطأ');
     } finally {
@@ -249,27 +265,50 @@ export default function CustomerDashboard() {
                 key={job.id}
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="bg-white p-6 rounded-[2.5rem] border border-primary/10 shadow-sm"
+                className="bg-white p-6 rounded-[2.5rem] border border-primary/10 shadow-sm flex flex-col"
               >
                 <div className="flex justify-between mb-4">
                   <div className="flex items-center gap-2 text-primary font-bold">
                     <Hammer size={20} />
                     <span>{job.craftId}</span>
                     {job.isPremium && <span className="bg-gold text-white text-[10px] px-2 py-0.5 rounded-full ml-2">مميز 🌟</span>}
-                  </div>
-                  <div className={`px-3 py-1 rounded-full text-xs font-bold ${
-                    job.status === 'open' ? 'bg-green-100 text-green-700' : 
-                    job.status === 'assigned' ? 'bg-primary/20 text-primary' :
-                    job.status === 'completed' ? 'bg-blue-100 text-blue-700' : 'bg-secondary/10 text-secondary'
-                  }`}>
-                    {job.status === 'open' ? 'مفتوح' : 
-                     job.status === 'assigned' ? 'قيد العمل' : 
-                     job.status === 'completed' ? 'مكتمل' : job.status}
+                    {job.urgency === 'emergency' && <span className="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full ml-2 animate-pulse">عاجل 🚨</span>}
                   </div>
                 </div>
                 
-                <div className="bg-sand p-4 rounded-2xl mb-4">
+                {/* Visual Timeline */}
+                <div className="flex items-center justify-between mb-6 relative">
+                  <div className="absolute left-0 right-0 h-1 bg-sand top-1/2 -translate-y-1/2 z-0 rounded-full overflow-hidden">
+                    <div className={`h-full bg-primary transition-all duration-500`} style={{ width: job.status === 'open' ? '0%' : job.status === 'assigned' ? '50%' : '100%' }} />
+                  </div>
+                  
+                  <div className={`z-10 w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs ${job.status === 'open' || job.status === 'assigned' || job.status === 'completed' ? 'bg-primary text-white border-2 border-white' : 'bg-sand text-muted border-2 border-white'}`}>1</div>
+                  <div className={`z-10 w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs ${job.status === 'assigned' || job.status === 'completed' ? 'bg-primary text-white border-2 border-white' : 'bg-sand text-muted border-2 border-white'}`}>2</div>
+                  <div className={`z-10 w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs ${job.status === 'completed' ? 'bg-primary text-white border-2 border-white' : 'bg-sand text-muted border-2 border-white'}`}>3</div>
+                </div>
+                <div className="flex items-center justify-between mb-6 text-[10px] font-bold text-muted -mt-4">
+                  <span>مفتوح</span>
+                  <span>قيد العمل</span>
+                  <span>مكتمل</span>
+                </div>
+                
+                <div className="bg-sand p-4 rounded-2xl mb-4 space-y-4">
                   <audio src={job.voiceRequestUrl} controls className="w-full h-8" />
+                  {job.additionalVoiceUrls?.map((url, i) => (
+                    <div key={i} className="pt-2 border-t border-border/50">
+                      <span className="text-xs text-muted font-bold block mb-1">إضافة #{i + 1}</span>
+                      <audio src={url} controls className="w-full h-8" />
+                    </div>
+                  ))}
+                  
+                  {job.status === 'open' && (
+                    <button 
+                      onClick={() => setAddVoiceJobId(job.id!)}
+                      className="w-full py-2 bg-white rounded-xl text-primary font-bold text-xs flex items-center justify-center gap-2 hover:bg-primary hover:text-white transition-colors"
+                    >
+                      <Mic size={14} /> إضافة تفاصيل للطلب
+                    </button>
+                  )}
                 </div>
 
                 <div className="flex items-center justify-between mt-auto pt-4 border-t border-sand">
@@ -282,14 +321,14 @@ export default function CustomerDashboard() {
                   
                   <div className="flex gap-2">
                     {job.status === 'open' && !job.isPremium && (
-                      <button onClick={() => promoteJob(job.id, job.craftId)} className="bg-gold/10 text-gold hover:bg-gold hover:text-white transition-colors px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1">
+                      <button onClick={() => promoteJob(job.id!, job.craftId!)} className="bg-gold/10 text-gold hover:bg-gold hover:text-white transition-colors px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1">
                         <Star size={14} />
                         تمييز الطلب
                       </button>
                     )}
                     
                     {job.status === 'assigned' && !job.customerConfirmedCompletion && (
-                      <button onClick={() => handleConfirmCompletion(job.id, job.workerId)} className="bg-green-500 text-white px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1">
+                      <button onClick={() => handleConfirmCompletion(job.id!, job.workerId!)} className="bg-green-500 text-white px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1">
                         <CheckCircle size={14} />
                         تأكيد الإنجاز
                       </button>
@@ -350,11 +389,61 @@ export default function CustomerDashboard() {
               {step === 2 && (
                 <div className="space-y-8">
                   <h4 className="text-xl font-bold text-primary">2. سجل صرختك (طلبك بصوتك)</h4>
+                  
+                  <div className="flex gap-6 mb-4 bg-white p-4 rounded-xl border border-border">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input type="radio" value="normal" checked={postData.urgency === 'normal'} onChange={e => setPostData({...postData, urgency: e.target.value})} className="accent-primary w-5 h-5" />
+                      <span className="font-bold">عادي</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input type="radio" value="emergency" checked={postData.urgency === 'emergency'} onChange={e => setPostData({...postData, urgency: e.target.value})} className="accent-red-500 w-5 h-5" />
+                      <span className="font-bold text-red-500">حالة طارئة 🚨</span>
+                    </label>
+                  </div>
+
                   <p className="text-secondary/60">اشرح المشكلة باختصار، مثلاً: "عندي حنفية مكسورة في المطبخ تسرّب ماء، محتاج سباك الآن"</p>
                   <VoiceRecorder onRecordingComplete={handlePost} label="سجل تفاصيل الطلب" />
                   {loading && <p className="text-center text-primary font-black animate-pulse">جاري إرسال صرختك للعالم...</p>}
                 </div>
               )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Add Additional Voice Modal */}
+      <AnimatePresence>
+        {addVoiceJobId && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setAddVoiceJobId(null)}
+              className="absolute inset-0 bg-secondary/80 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="bg-sand w-full max-w-2xl rounded-[3rem] p-8 md:p-12 relative z-10 shadow-2xl"
+            >
+              <button 
+                onClick={() => setAddVoiceJobId(null)}
+                className="absolute left-8 top-8 p-2 bg-white rounded-full text-secondary/40 hover:text-red-500 transition-colors"
+              >
+                <X size={24} />
+              </button>
+
+              <div className="mb-12">
+                <h3 className="text-3xl font-black text-secondary">إضافة تفاصيل لطلبك</h3>
+                <p className="text-secondary/60">سجل رسالة صوتية إضافية للحرفيين حول هذا الطلب</p>
+              </div>
+
+              <div className="space-y-8 flex flex-col items-center">
+                <VoiceRecorder onRecordingComplete={handleAppendedVoice} label="سجل التفاصيل بصوتك" />
+                {loading && <p className="text-center text-primary font-black animate-pulse">جاري الاستمرار...</p>}
+              </div>
             </motion.div>
           </div>
         )}

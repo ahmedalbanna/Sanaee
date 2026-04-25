@@ -9,6 +9,7 @@ import WorkerDashboard from './screens/WorkerDashboard';
 import CustomerDashboard from './screens/CustomerDashboard';
 import { Loader2 } from 'lucide-react';
 import { Toaster, toast } from 'react-hot-toast';
+import { LanguageProvider } from './lib/LanguageContext';
 
 type Screen = 'landing' | 'worker-reg' | 'worker-dash' | 'customer-dash';
 
@@ -63,43 +64,45 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-sand">
-      <Toaster position="top-center" toastOptions={{ style: { background: '#2D241E', color: '#fff', borderRadius: '20px' } }} />
-      <Navbar user={user} onNavigate={(s) => navigate(s as Screen)} />
-      
-      <main className="max-w-7xl mx-auto">
-        {screen === 'landing' && (
-          <Landing 
-            user={user} 
-            onSelectRole={(role) => {
-              if (role === 'worker') {
-                navigate(workerProfile ? 'worker-dash' : 'worker-reg');
-              } else {
-                navigate('customer-dash');
-              }
-            }} 
-          />
-        )}
+    <LanguageProvider>
+      <div className="min-h-screen bg-sand">
+        <Toaster position="top-center" toastOptions={{ style: { background: '#2D241E', color: '#fff', borderRadius: '20px' } }} />
+        <Navbar user={user} onNavigate={(s) => navigate(s as Screen)} />
+        
+        <main className="max-w-7xl mx-auto">
+          {screen === 'landing' && (
+            <Landing 
+              user={user} 
+              onSelectRole={(role) => {
+                if (role === 'worker') {
+                  navigate(workerProfile ? 'worker-dash' : 'worker-reg');
+                } else {
+                  navigate('customer-dash');
+                }
+              }} 
+            />
+          )}
 
-        {screen === 'worker-reg' && (
-          <WorkerRegistration 
-            onBack={() => navigate('landing')}
-            onComplete={async () => {
-              const profile = await getWorkerProfile(user!.uid);
-              setWorkerProfile(profile);
-              navigate('worker-dash');
-            }} 
-          />
-        )}
+          {screen === 'worker-reg' && (
+            <WorkerRegistration 
+              onBack={() => navigate('landing')}
+              onComplete={async () => {
+                const profile = await getWorkerProfile(user!.uid);
+                setWorkerProfile(profile);
+                navigate('worker-dash');
+              }} 
+            />
+          )}
 
-        {screen === 'worker-dash' && workerProfile && (
-          <WorkerDashboard profile={workerProfile} />
-        )}
+          {screen === 'worker-dash' && workerProfile && (
+            <WorkerDashboard profile={workerProfile as any} />
+          )}
 
-        {screen === 'customer-dash' && (
-          <CustomerDashboard />
-        )}
-      </main>
-    </div>
+          {screen === 'customer-dash' && (
+            <CustomerDashboard />
+          )}
+        </main>
+      </div>
+    </LanguageProvider>
   );
 }

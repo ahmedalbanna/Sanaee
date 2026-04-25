@@ -2,6 +2,7 @@ import { motion } from 'motion/react';
 import { Hammer, UserSearch, LogIn } from 'lucide-react';
 import { auth } from '../lib/firebase';
 import { GoogleAuthProvider, signInWithPopup, User } from 'firebase/auth';
+import { useLanguage } from '../lib/LanguageContext';
 
 interface LandingProps {
   onSelectRole: (role: 'worker' | 'customer') => void;
@@ -9,6 +10,8 @@ interface LandingProps {
 }
 
 export default function Landing({ onSelectRole, user }: LandingProps) {
+  const { t } = useLanguage();
+  
   const handleLogin = async () => {
     const provider = new GoogleAuthProvider();
     try {
@@ -40,7 +43,7 @@ export default function Landing({ onSelectRole, user }: LandingProps) {
           className="flex items-center gap-3 bg-secondary text-white px-8 py-5 rounded-full text-xl font-bold hover:bg-secondary/90 transition-all shadow-xl hover:scale-105 active:scale-95"
         >
           <LogIn />
-          ابدأ الآن - سجل دخولك
+          {t('login')}
         </button>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 w-full max-w-4xl">
@@ -52,7 +55,7 @@ export default function Landing({ onSelectRole, user }: LandingProps) {
             <div className="w-24 h-24 bg-primary/10 rounded-full flex items-center justify-center mb-6 text-primary group-hover:bg-primary group-hover:text-white transition-colors">
               <Hammer size={48} />
             </div>
-            <h3 className="text-3xl font-black mb-3">أنا صنايعي</h3>
+            <h3 className="text-3xl font-black mb-3">{t('workerBtn')}</h3>
             <p className="text-secondary/60">سجل مهاراتك، استمتع بطلبات منطقتك، وابني سمعتك المسموعة.</p>
           </motion.button>
 
@@ -64,7 +67,7 @@ export default function Landing({ onSelectRole, user }: LandingProps) {
             <div className="w-24 h-24 bg-secondary/10 rounded-full flex items-center justify-center mb-6 text-secondary group-hover:bg-secondary group-hover:text-white transition-colors">
               <UserSearch size={48} />
             </div>
-            <h3 className="text-3xl font-black mb-3">أنا صاحب حاجة</h3>
+            <h3 className="text-3xl font-black mb-3">{t('customerBtn')}</h3>
             <p className="text-secondary/60">اطلب الحرفي اللي تحتاجه بصوتك، واستلم ردود فورية في منطقتك.</p>
           </motion.button>
         </div>
