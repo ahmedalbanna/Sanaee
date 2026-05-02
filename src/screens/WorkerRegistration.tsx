@@ -25,7 +25,7 @@ export default function WorkerRegistration({ onComplete, onBack }: WorkerRegistr
   const handleVoiceComplete = async (blob: Blob) => {
     try {
       setIsSubmitting(true);
-      const url = await uploadAudio(blob, 'worker_profiles');
+      const url = await uploadAudio(blob);
       setFormData(prev => ({ ...prev, voiceProfileUrl: url }));
       setStep(3);
     } catch (error) {

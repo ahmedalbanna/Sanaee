@@ -95,7 +95,7 @@ export default function App() {
           )}
 
           {screen === 'worker-dash' && workerProfile && (
-            <WorkerDashboard profile={workerProfile as any} />
+            <WorkerDashboard profile={workerProfile} />
           )}
 
           {screen === 'customer-dash' && (

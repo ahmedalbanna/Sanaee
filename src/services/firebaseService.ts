@@ -51,7 +51,7 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
 
 // --- Storage Services ---
 
-export const uploadAudio = async (blob: Blob, folder: string) => {
+export const uploadAudio = async (blob: Blob) => {
   const formData = new FormData();
   formData.append('audio', blob, 'audio.webm');
   
@@ -267,6 +267,15 @@ export const getOpenJobs = async (craftId?: string) => {
   }
 };
 
+export interface JobBid {
+  id?: string;
+  workerId: string;
+  workerName: string;
+  workerRating: number;
+  voiceBidUrl: string;
+  createdAt: unknown;
+}
+
 export interface Job {
   id?: string;
   customerId?: string;
@@ -280,7 +289,33 @@ export interface Job {
   customerConfirmedCompletion?: boolean;
   workerConfirmedCompletion?: boolean;
   createdAt?: unknown;
+  bids?: JobBid[];
 }
+
+export const addJobBid = async (jobId: string, voiceBidUrl: string, profile: WorkerProfile) => {
+  if (!auth.currentUser) throw new Error('Not authenticated');
+  const path = `jobs/${jobId}`;
+  try {
+    const jobRef = doc(db, 'jobs', jobId);
+    const snap = await getDoc(jobRef);
+    if (!snap.exists()) return;
+    
+    const bids = snap.data().bids || [];
+    const newBid: JobBid = {
+      workerId: auth.currentUser.uid,
+      workerName: profile.name || 'حرفي',
+      workerRating: profile.rating || 5,
+      voiceBidUrl,
+      createdAt: new Date().toISOString() // Using simple ISO for simpler bid sorting if needed
+    };
+    
+    await updateDoc(jobRef, {
+      bids: [...bids, newBid]
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+};
 
 export const addAdditionalVoiceToJob = async (jobId: string, url: string) => {
   const path = `jobs/${jobId}`;

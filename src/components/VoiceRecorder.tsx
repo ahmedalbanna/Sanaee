@@ -6,9 +6,15 @@ interface VoiceRecorderProps {
   onRecordingComplete: (blob: Blob) => void;
   maxDuration?: number;
   label?: string;
+  variant?: 'default' | 'minimal' | 'huge';
 }
 
-export default function VoiceRecorder({ onRecordingComplete, maxDuration = 30, label = "سجل صوتك" }: VoiceRecorderProps) {
+export default function VoiceRecorder({ 
+  onRecordingComplete, 
+  maxDuration = 30, 
+  label = "سجل صوتك",
+  variant = 'default' 
+}: VoiceRecorderProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
@@ -70,10 +76,10 @@ export default function VoiceRecorder({ onRecordingComplete, maxDuration = 30, l
   };
 
   return (
-    <div className="bg-white p-6 rounded-3xl shadow-sm border-2 border-primary/10 w-full max-w-md mx-auto">
-      <h3 className="text-xl font-bold mb-4 text-center text-primary">{label}</h3>
+    <div className={`flex flex-col items-center gap-4 w-full ${variant === 'huge' ? '' : 'bg-white p-6 rounded-3xl shadow-sm border-2 border-primary/10 max-w-md mx-auto'}`}>
+      {variant !== 'huge' && label && <h3 className="text-xl font-bold mb-2 text-center text-primary">{label}</h3>}
       
-      <div className="flex flex-col items-center gap-6">
+      <div className="flex flex-col items-center gap-6 w-full">
         <div className="relative">
           <AnimatePresence mode="wait">
             {!audioUrl ? (
@@ -83,31 +89,40 @@ export default function VoiceRecorder({ onRecordingComplete, maxDuration = 30, l
                 animate={{ scale: 1, opacity: 1 }}
                 exit={{ scale: 0.8, opacity: 0 }}
                 onClick={isRecording ? stopRecording : startRecording}
-                className={`w-24 h-24 rounded-full flex items-center justify-center transition-all ${
-                  isRecording ? 'bg-red-500 scale-110 voice-record-pulse' : 'bg-primary hover:bg-primary/90'
+                className={`rounded-full flex items-center justify-center transition-all ${
+                  variant === 'huge' ? 'w-48 h-48 sm:w-64 sm:h-64' : 'w-24 h-24'
+                } ${
+                  isRecording ? 'bg-red-500 scale-110 voice-record-pulse' : 'bg-primary hover:bg-primary/90 shadow-xl'
                 }`}
               >
-                {isRecording ? <Square className="text-white fill-white" /> : <Mic className="text-white w-10 h-10" />}
+                {isRecording ? (
+                  <Square className={`${variant === 'huge' ? 'w-16 h-16' : 'w-8 h-8'} text-white fill-white`} />
+                ) : (
+                  <Mic className={`${variant === 'huge' ? 'w-24 h-24' : 'w-10 h-10'} text-white`} />
+                )}
               </motion.button>
             ) : (
               <motion.div
                 key="player"
                 initial={{ scale: 0.8, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
-                className="flex items-center gap-4"
+                className="flex flex-col sm:flex-row items-center gap-4 bg-sand p-4 rounded-[2rem]"
               >
-                <button 
-                  onClick={resetRecording}
-                  className="p-3 bg-red-100 text-red-600 rounded-full hover:bg-red-200 transition-colors"
-                >
-                  <Trash2 size={24} />
-                </button>
-                <audio src={audioUrl} controls className="h-10 rounded-full bg-sand" />
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={resetRecording}
+                    className="p-3 bg-white text-red-600 rounded-full hover:bg-red-50 shadow-sm transition-colors"
+                  >
+                    <Trash2 size={24} />
+                  </button>
+                  <audio src={audioUrl} controls className="h-10 rounded-full" />
+                </div>
                 <button 
                   onClick={confirmRecording}
-                  className="p-3 bg-green-500 text-white rounded-full hover:bg-green-600 shadow-lg transition-transform hover:scale-110"
+                  className="w-full sm:w-auto p-4 bg-green-500 text-white rounded-full hover:bg-green-600 shadow-lg transition-transform hover:scale-105 flex items-center justify-center gap-2 font-bold"
                 >
                   <CheckCircle size={24} />
+                  إرسال الآن
                 </button>
               </motion.div>
             )}
@@ -115,10 +130,13 @@ export default function VoiceRecorder({ onRecordingComplete, maxDuration = 30, l
         </div>
 
         <div className="flex flex-col items-center">
-          <span className={`text-2xl font-mono ${isRecording ? 'text-red-500 animate-pulse' : 'text-secondary'}`}>
+          <span className={`font-mono ${variant === 'huge' ? 'text-4xl' : 'text-2xl'} ${isRecording ? 'text-red-500 animate-pulse' : 'text-secondary'}`}>
             00:{duration.toString().padStart(2, '0')}
           </span>
-          <span className="text-xs text-secondary/60 mt-1">الحد الأقصى {maxDuration} ثانية</span>
+          {variant !== 'huge' && <span className="text-xs text-secondary/60 mt-1">الحد الأقصى {maxDuration} ثانية</span>}
+          {variant === 'huge' && !isRecording && !audioUrl && (
+            <p className="mt-4 text-xl font-black text-secondary text-center">اضغط وسجل طلبك بصوتك</p>
+          )}
         </div>
       </div>
     </div>

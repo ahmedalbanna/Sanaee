@@ -1,3 +1,4 @@
+import React from 'react';
 import { CRAFT_TYPES } from '../constants';
 import * as Icons from 'lucide-react';
 import { motion } from 'motion/react';
