@@ -1,11 +1,130 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { AlertCircle, Disc, Hammer, Star } from 'lucide-react';
+import { AlertCircle, Disc, Hammer, Star, MessageSquare, Phone, CheckCircle, ShieldCheck } from 'lucide-react';
 import VoiceRecorder from '../components/VoiceRecorder';
 import CraftSelector from '../components/CraftSelector';
-import { createJobRequest, uploadAudio, subscribeToJobsAll, assignWorkerToJob, Job, subscribeToResponses, JobResponse, reportUser } from '../services/firebaseService';
+import { createJobRequest, uploadAudio, subscribeToJobsAll, assignWorkerToJob, Job, subscribeToResponses, JobResponse, reportUser, subscribeToJobMessages, addVoiceMessage, VoiceMessage, confirmJobCompletion, addReview } from '../services/firebaseService';
 import { auth } from '../lib/firebase';
 import toast from 'react-hot-toast';
+
+function InAppCallMock({ onEnd }: { onEnd: () => void }) {
+  return (
+    <div className="fixed inset-0 z-[100] bg-black/90 flex flex-col items-center justify-center text-white">
+      <div className="w-32 h-32 bg-primary/20 rounded-full flex items-center justify-center animate-pulse mb-8 overflow-hidden relative">
+        <div className="absolute inset-0 border-4 border-primary rounded-full animate-ping opacity-20" />
+        <Phone size={48} className="text-primary animate-bounce" />
+      </div>
+      <h2 className="text-4xl font-black mb-2">جاري الاتصال...</h2>
+      <p className="text-white/50 mb-12">اتصال عبر الإنترنت (VoIP)</p>
+      
+      <button onClick={onEnd} className="bg-red-500 w-20 h-20 rounded-full flex items-center justify-center shadow-red-500/50 shadow-2xl hover:scale-110 transition-transform">
+        <Phone size={32} className="rotate-[135deg]" />
+      </button>
+    </div>
+  );
+}
+
+function JobChat({ jobId }: { jobId: string, workerId?: string }) {
+  const [messages, setMessages] = useState<VoiceMessage[]>([]);
+  const [calling, setCalling] = useState(false);
+  
+  useEffect(() => {
+    const unsub = subscribeToJobMessages(jobId, setMessages);
+    return () => unsub();
+  }, [jobId]);
+
+  const handleSend = async (blob: Blob) => {
+    try {
+      const url = await uploadAudio(blob);
+      await addVoiceMessage(jobId, url);
+    } catch {
+      toast.error('فشل إرسال الرسالة');
+    }
+  };
+
+  return (
+    <div className="mt-4 border-t border-primary/10 pt-4">
+      {calling && <InAppCallMock onEnd={() => setCalling(false)} />}
+      <div className="flex justify-between items-center mb-4">
+        <h4 className="font-black text-secondary flex items-center gap-2">
+          <MessageSquare size={18} />
+          التفاوض / المحادثة مع الحرفي
+        </h4>
+        <button onClick={() => setCalling(true)} className="bg-green-100 text-green-700 px-4 py-2 rounded-xl text-sm font-black flex items-center gap-2 hover:bg-green-200">
+          <Phone size={14} />
+          اتصال (إنترنت)
+        </button>
+      </div>
+      
+      <div className="space-y-3 max-h-60 overflow-y-auto mb-4 bg-sand p-4 rounded-2xl">
+        {messages.length === 0 ? (
+          <p className="text-center text-sm text-secondary/40 italic">أرسل رسالة صوتية لبدء التفاوض</p>
+        ) : (
+          messages.map(msg => {
+            const isMe = msg.senderId === auth.currentUser?.uid;
+            return (
+              <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+                <div className={`p-2 rounded-2xl max-w-[80%] ${isMe ? 'bg-primary/20 rounded-br-none' : 'bg-white rounded-bl-none shadow-sm'}`}>
+                  <audio src={msg.audioUrl} controls className="h-8 max-w-full" style={{ width: '200px' }} />
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+      
+      <div className="flex justify-center">
+        <VoiceRecorder onRecordingComplete={handleSend} variant="default" label="رسالة صوتية" />
+      </div>
+    </div>
+  );
+}
+
+function ReviewWorker({ jobId, workerId, onCompleted }: { jobId: string, workerId: string, onCompleted: () => void }) {
+  const [rating, setRating] = useState(5);
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSubmit = async (blob: Blob) => {
+    try {
+      setSubmitting(true);
+      const url = await uploadAudio(blob);
+      await addReview(workerId, jobId, url, rating);
+      await confirmJobCompletion(jobId, 'customer');
+      toast.success('شكرًا لتقييمك!');
+      onCompleted();
+    } catch {
+      toast.error('حدث خطأ أثناء التقييم');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="bg-gold/5 border-2 border-gold/20 p-6 rounded-[2rem] mt-4">
+      <h4 className="font-black text-xl text-gold mb-4 flex items-center gap-2">
+        <ShieldCheck size={24} />
+        تقييم الحرفي (المطارق الذهبية)
+      </h4>
+      <p className="text-sm text-secondary/60 mb-4">كيف كان الشغل؟ كم مطرقة تعطيه؟ وسجل رأيك الصوتي ليسمعه غيرك.</p>
+      
+      <div className="flex justify-center gap-2 mb-6">
+        {[1, 2, 3, 4, 5].map((num) => (
+          <button
+            key={num}
+            onClick={() => setRating(num)}
+            className={`w-12 h-12 rounded-full flex items-center justify-center transition-all ${
+              rating >= num ? 'bg-gold text-white scale-110 shadow-lg' : 'bg-sand text-secondary/40'
+            }`}
+          >
+            <Hammer size={20} fill={rating >= num ? 'currentColor' : 'none'} />
+          </button>
+        ))}
+      </div>
+
+      <VoiceRecorder onRecordingComplete={handleSubmit} variant="default" label={submitting ? "جاري الإرسال..." : "سجل تقييمك لإكمال الطلب"} />
+    </div>
+  );
+}
 
 function JobBids({ jobId, onAccept }: { jobId: string, onAccept: () => void }) {
   const [bids, setBids] = useState<JobResponse[]>([]);
@@ -262,15 +381,29 @@ export default function CustomerDashboard() {
                       <audio src={job.voiceRequestUrl} controls className="w-full" />
                     </div>
 
-                    {/* Bids Section */}
-                    <div className="space-y-4">
-                      <h4 className="font-black text-xl text-primary flex items-center gap-2">
-                        <Disc size={20} className="animate-spin-slow" />
-                        رُدود الحرفيين المتاحة
-                      </h4>
-                      
-                      <JobBids jobId={job.id!} onAccept={() => handleAccept(job.id!)} />
-                    </div>
+                    {job.status === 'open' ? (
+                      <div className="space-y-4">
+                        <h4 className="font-black text-xl text-primary flex items-center gap-2">
+                          <Disc size={20} className="animate-spin-slow" />
+                          رُدود الحرفيين المتاحة
+                        </h4>
+                        <JobBids jobId={job.id!} onAccept={() => handleAccept(job.id!)} />
+                      </div>
+                    ) : job.status === 'assigned' ? (
+                      <div className="space-y-4">
+                        <JobChat jobId={job.id!} workerId={job.workerId!} />
+                        <ReviewWorker 
+                          jobId={job.id!} 
+                          workerId={job.workerId!} 
+                          onCompleted={() => toast.success("تم إغلاق الطلب بنجاح")}
+                        />
+                      </div>
+                    ) : job.status === 'completed' ? (
+                      <div className="bg-green-50 p-6 rounded-3xl text-center border border-green-200">
+                        <CheckCircle size={48} className="text-green-500 mx-auto mb-4" />
+                        <h4 className="font-black text-2xl text-green-700">اكتمل العمل وتقيم الحرفي</h4>
+                      </div>
+                    ) : null}
                   </motion.div>
                 ))
               )}

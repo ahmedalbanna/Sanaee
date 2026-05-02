@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Hammer, MessageSquare, Star, Mic, Play, Trophy, User, CheckCircle, MapPin, AlertOctagon } from 'lucide-react';
-import { subscribeToJobsAll, updateWorkerBaraka, confirmJobCompletion, addJobBid, uploadAudio, getWorkerReviews, Job, WorkerProfile } from '../services/firebaseService';
+import { Hammer, MessageSquare, Star, Mic, Play, Trophy, User, CheckCircle, MapPin, AlertOctagon, Phone } from 'lucide-react';
+import { subscribeToJobsAll, updateWorkerBaraka, confirmJobCompletion, addJobBid, uploadAudio, getWorkerReviews, Job, WorkerProfile, subscribeToJobMessages, addVoiceMessage, VoiceMessage } from '../services/firebaseService';
 import { auth } from '../lib/firebase';
 import { distanceBetween } from 'geofire-common';
 import VoiceRecorder from '../components/VoiceRecorder';
@@ -12,6 +12,79 @@ interface Review {
   rating: number;
   voiceReviewUrl?: string;
   createdAt: { seconds: number; nanoseconds: number } | string | Date;
+}
+
+function InAppCallMock({ onEnd }: { onEnd: () => void }) {
+  return (
+    <div className="fixed inset-0 z-[100] bg-black/90 flex flex-col items-center justify-center text-white">
+      <div className="w-32 h-32 bg-primary/20 rounded-full flex items-center justify-center animate-pulse mb-8 overflow-hidden relative">
+        <div className="absolute inset-0 border-4 border-primary rounded-full animate-ping opacity-20" />
+        <Phone size={48} className="text-primary animate-bounce" />
+      </div>
+      <h2 className="text-4xl font-black mb-2">جاري الاتصال العسكري...</h2>
+      <p className="text-white/50 mb-12">اتصال عبر الإنترنت (VoIP)</p>
+      
+      <button onClick={onEnd} className="bg-red-500 w-20 h-20 rounded-full flex items-center justify-center shadow-red-500/50 shadow-2xl hover:scale-110 transition-transform">
+        <Phone size={32} className="rotate-[135deg]" />
+      </button>
+    </div>
+  );
+}
+
+function JobChat({ jobId }: { jobId: string, isWorker?: boolean }) {
+  const [messages, setMessages] = useState<VoiceMessage[]>([]);
+  const [calling, setCalling] = useState(false);
+  
+  useEffect(() => {
+    const unsub = subscribeToJobMessages(jobId, setMessages);
+    return () => unsub();
+  }, [jobId]);
+
+  const handleSend = async (blob: Blob) => {
+    try {
+      const url = await uploadAudio(blob);
+      await addVoiceMessage(jobId, url);
+    } catch {
+      toast.error('فشل إرسال الرسالة');
+    }
+  };
+
+  return (
+    <div className="mt-4 border-t border-primary/10 pt-4">
+      {calling && <InAppCallMock onEnd={() => setCalling(false)} />}
+      <div className="flex justify-between items-center mb-4">
+        <h4 className="font-black text-secondary flex items-center gap-2">
+          <MessageSquare size={18} />
+          التفاوض / المحادثة
+        </h4>
+        <button onClick={() => setCalling(true)} className="bg-green-100 text-green-700 px-4 py-2 rounded-xl text-sm font-black flex items-center gap-2 hover:bg-green-200">
+          <Phone size={14} />
+          اتصال (إنترنت)
+        </button>
+      </div>
+      
+      <div className="space-y-3 max-h-60 overflow-y-auto mb-4 bg-sand p-4 rounded-2xl">
+        {messages.length === 0 ? (
+          <p className="text-center text-sm text-secondary/40 italic">أرسل رسالة صوتية لبدء التفاوض</p>
+        ) : (
+          messages.map(msg => {
+            const isMe = msg.senderId === auth.currentUser?.uid;
+            return (
+              <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+                <div className={`p-2 rounded-2xl max-w-[80%] ${isMe ? 'bg-primary/20 rounded-br-none' : 'bg-white rounded-bl-none shadow-sm'}`}>
+                  <audio src={msg.audioUrl} controls className="h-8 max-w-full" style={{ width: '200px' }} />
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+      
+      <div className="flex justify-center">
+        <VoiceRecorder onRecordingComplete={handleSend} variant="default" label="رسالة صوتية" />
+      </div>
+    </div>
+  );
 }
 
 export default function WorkerDashboard({ profile }: { profile: WorkerProfile }) {
@@ -158,6 +231,22 @@ export default function WorkerDashboard({ profile }: { profile: WorkerProfile })
     toast.success('تم التأكيد!');
   };
 
+  const promoteWorker = async () => {
+    try {
+      const resp = await fetch('/api/promote-worker', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workerId: profile.uid })
+      });
+      const data = await resp.json();
+      if (data.url) {
+        window.location.assign(data.url);
+      }
+    } catch {
+      toast.error('حدث خطأ أثناء الاتصال بالدفع');
+    }
+  };
+
   return (
     <div className="p-4 md:p-8 flex flex-col gap-8">
       {/* Worker Branding Header */}
@@ -262,12 +351,28 @@ export default function WorkerDashboard({ profile }: { profile: WorkerProfile })
           <motion.div key="mine" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
             {myJobs.map((job) => (
               <div key={job.id} className="bg-white rounded-[3rem] p-8 border border-primary/10 shadow-md">
-                <h3 className="font-black text-2xl mb-4">{job.status === 'completed' ? 'عمل مكتمل ✅' : 'عمل جاري 🛠️'}</h3>
-                <audio src={job.voiceRequestUrl} controls className="w-full mb-6" />
+                 <div className="flex justify-between items-center mb-4">
+                  <h3 className="font-black text-2xl text-secondary">{job.status === 'completed' ? 'عمل مكتمل ✅' : 'عمل جاري 🛠️'}</h3>
+                  <span className={`text-xs font-bold px-3 py-1 rounded-full ${job.status === 'completed' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
+                    {job.craftId}
+                  </span>
+                </div>
+                <div className="bg-sand p-4 rounded-2xl mb-4">
+                  <p className="text-secondary/60 text-sm font-bold mb-2">الطلب الأصلي:</p>
+                  <audio src={job.voiceRequestUrl} controls className="w-full" />
+                </div>
+                
+                {job.status === 'assigned' && (
+                  <JobChat jobId={job.id!} isWorker={true} />
+                )}
+
                 {job.status === 'assigned' && !job.workerConfirmedCompletion && (
-                  <button onClick={() => handleConfirmCompletion(job.id!)} className="w-full bg-green-500 text-white py-4 rounded-2xl font-black text-xl flex items-center justify-center gap-2">
+                  <button onClick={() => handleConfirmCompletion(job.id!)} className="w-full mt-4 bg-green-500 text-white py-4 rounded-2xl font-black text-xl flex items-center justify-center gap-2 hover:bg-green-600 transition-colors">
                     <CheckCircle size={24} /> تم الإنجاز
                   </button>
+                )}
+                {job.status === 'assigned' && job.workerConfirmedCompletion && (
+                  <p className="text-center font-bold text-green-600 mt-4">بانتظار تأكيد العميل وتقييمه...</p>
                 )}
               </div>
             ))}
@@ -284,18 +389,23 @@ export default function WorkerDashboard({ profile }: { profile: WorkerProfile })
                   <div className="flex justify-between items-center mb-4">
                     <h4 className="font-black text-xl">نظام البركة الحساوي</h4>
                     <button onClick={toggleBaraka} className={`w-16 h-8 rounded-full p-1 transition-colors ${isBaraka ? 'bg-green-500' : 'bg-gray-300'}`}>
-                      <div className={`w-6 h-6 bg-white rounded-full transition-transform ${isBaraka ? 'translate-x-8' : 'translate-x-0'}`} />
+                      <div className={`w-6 h-6 bg-white rounded-full transition-transform ${isBaraka ? 'translate-x-8' : 'translate-x-[4px]'}`} />
                     </button>
                   </div>
                   <p className="text-secondary/60 font-bold italic">"عند تفعيل هذا الخيار، سيظهر للعملاء المحتاجين أنك مستعد للمساعدة التطوعية."</p>
                 </div>
 
                 <div className="p-6 border-2 border-gold/20 rounded-3xl bg-gold/5">
-                  <h4 className="font-black text-xl text-gold mb-2">باقة "المُبرز" (نجم الحارة)</h4>
+                  <h4 className="font-black text-xl text-gold mb-2 flex items-center gap-2">
+                    باقة "المُبرز" (نجم الحارة)
+                    {profile.isPremium && <span className="text-xs bg-gold text-white px-2 py-1 rounded-full">نشط</span>}
+                  </h4>
                   <p className="text-sm text-secondary/60 mb-6">يتم تمييز ملفك ببرواز ذهبي وتظهر في مقدمة النتائج لجميع العملاء.</p>
-                  <button className="w-full bg-gold text-white font-black py-4 rounded-2xl shadow-lg flex items-center justify-center gap-2">
-                    <Trophy size={20} /> ترقية الآن (1000 ريال)
-                  </button>
+                  {!profile.isPremium && (
+                    <button onClick={promoteWorker} className="w-full bg-gold text-white font-black py-4 rounded-2xl shadow-lg flex items-center justify-center gap-2 hover:bg-yellow-600 transition-colors">
+                      <Trophy size={20} /> ترقية الآن (1000 ريال)
+                    </button>
+                  )}
                 </div>
               </div>
             </div>

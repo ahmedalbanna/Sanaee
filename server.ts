@@ -24,7 +24,7 @@ async function startServer() {
 
   // --- API Routes ---
   
-  // Create Stripe Checkout Session
+  // Create Stripe Checkout Session for Job Promotion
   app.post('/api/create-checkout-session', async (req, res) => {
     try {
       const stripeKey = process.env.STRIPE_SECRET_KEY;
@@ -41,18 +41,58 @@ async function startServer() {
         line_items: [
           {
             price_data: {
-              currency: 'yer', // Using Yemeni Rial or USD if YER not supported (Stripe uses USD generally for test)
+              currency: 'yer',
               product_data: {
                 name: `طلب مميز - ${craftId}`,
                 description: 'إظهار طلبك في أعلى القائمة وتنبيه الحرفيين فوراً.',
               },
-              unit_amount: 500 * 100, // 500 in cents, but if USD it's 500 cents = $5
+              unit_amount: 500 * 100, // 500 in cents
             },
             quantity: 1,
           },
         ],
         mode: 'payment',
         success_url: `${appUrl}/payment/success?session_id={CHECKOUT_SESSION_ID}&job_id=${jobId}`,
+        cancel_url: `${appUrl}/payment/cancel`,
+      });
+
+      res.json({ id: session.id, url: session.url });
+    } catch (error: unknown) {
+      console.error(error);
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ error: message });
+    }
+  });
+
+  // Create Stripe Checkout Session for Worker Promotion
+  app.post('/api/promote-worker', async (req, res) => {
+    try {
+      const stripeKey = process.env.STRIPE_SECRET_KEY;
+      if (!stripeKey) {
+        throw new Error('STRIPE_SECRET_KEY is missing');
+      }
+      const stripe = new Stripe(stripeKey);
+      
+      const { workerId } = req.body;
+      const appUrl = process.env.APP_URL || `http://localhost:${PORT}`;
+      
+      const session = await stripe.checkout.sessions.create({
+        payment_method_types: ['card'],
+        line_items: [
+          {
+            price_data: {
+              currency: 'yer',
+              product_data: {
+                name: 'باقة المُبرز - الحرفي المميز',
+                description: 'تمييز ملفك الشخصي كحرفي ماهر.',
+              },
+              unit_amount: 1000 * 100, // 1000 in cents
+            },
+            quantity: 1,
+          },
+        ],
+        mode: 'payment',
+        success_url: `${appUrl}/payment/worker-success?session_id={CHECKOUT_SESSION_ID}&worker_id=${workerId}`,
         cancel_url: `${appUrl}/payment/cancel`,
       });
 

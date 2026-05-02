@@ -1,13 +1,12 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Default deny
     match /{document=**} {
       allow read, write: if false;
     }
 
     function isSignedIn() {
-      return request.auth != null;
+      return request.auth != null && request.auth.uid != null;
     }
 
     function isOwner(uid) {
@@ -18,50 +17,174 @@ service cloud.firestore {
       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
-    // --- Users ---
-    match /users/{uid} {
-      allow get: if isSignedIn() && (isOwner(uid) || exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
-      allow list: if isSignedIn();
-      allow create: if isOwner(uid);
-      allow update: if isOwner(uid) && (
-        request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['name', 'phone', 'location', 'lat', 'lng', 'geohash', 'isAvailable', 'isBarakaActive', 'voiceProfileUrl', 'craftId', 'fcmToken'])
-      );
+    function incoming() {
+      return request.resource.data;
     }
 
-    // --- Requests ---
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'name', 'role', 'status'])
+        && data.uid is string && data.uid.size() <= 128
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 100
+        && data.role is string && data.role in ['customer', 'worker']
+        && data.status is string && data.status in ['active', 'suspended']
+        && (!('phone' in data) || (data.phone is string && data.phone.size() <= 20))
+        && (!('location' in data) || (data.location is map && data.location.keys().hasAll(['city', 'district']) && data.location.city is string && data.location.district is string))
+        && (!('lat' in data) || data.lat is number)
+        && (!('lng' in data) || data.lng is number)
+        && (!('geohash' in data) || (data.geohash is string && data.geohash.size() <= 20))
+        && (!('rating' in data) || data.rating is number)
+        && (!('reviewsCount' in data) || data.reviewsCount is number)
+        && (!('isPremium' in data) || data.isPremium is bool)
+        && (!('voiceFingerprintId' in data) || (data.voiceFingerprintId is string && data.voiceFingerprintId.size() <= 128))
+        && (!('voiceProfileUrl' in data) || (data.voiceProfileUrl is string && data.voiceProfileUrl.size() <= 1024))
+        && (!('craftId' in data) || (data.craftId is string && data.craftId.size() <= 64))
+        && (!('isBarakaActive' in data) || data.isBarakaActive is bool)
+        && (!('fcmToken' in data) || (data.fcmToken is string && data.fcmToken.size() <= 1024))
+        && (!('createdAt' in data) || data.createdAt is timestamp);
+    }
+
+    function isValidRequest(data) {
+      return data.keys().hasAll(['customerId', 'voiceRequestUrl', 'craftId', 'status'])
+        && data.customerId is string && data.customerId.size() <= 128
+        && data.voiceRequestUrl is string && data.voiceRequestUrl.size() <= 1024
+        && data.craftId is string && data.craftId.size() > 0 && data.craftId.size() <= 64
+        && data.status is string && data.status in ['open', 'assigned', 'completed', 'cancelled']
+        && (!('location' in data) || (data.location is map && data.location.keys().hasAll(['city', 'district']) && data.location.city is string && data.location.district is string))
+        && (!('lat' in data) || data.lat is number)
+        && (!('lng' in data) || data.lng is number)
+        && (!('geohash' in data) || (data.geohash is string && data.geohash.size() <= 20))
+        && (!('isPremium' in data) || data.isPremium is bool)
+        && (!('urgency' in data) || data.urgency in ['normal', 'emergency'])
+        && (!('workerId' in data) || (data.workerId is string && data.workerId.size() <= 128))
+        && (!('workerConfirmedCompletion' in data) || data.workerConfirmedCompletion is bool)
+        && (!('createdAt' in data) || data.createdAt is timestamp);
+    }
+
+    function isValidResponse(data) {
+      return data.keys().hasAll(['requestId', 'workerId', 'voiceResponseUrl', 'status'])
+        && data.requestId is string && data.requestId.size() <= 128
+        && data.workerId is string && data.workerId.size() <= 128
+        && data.voiceResponseUrl is string && data.voiceResponseUrl.size() <= 1024
+        && data.status is string && data.status in ['pending', 'accepted', 'rejected']
+        && (!('createdAt' in data) || data.createdAt is timestamp);
+    }
+
+    function isValidReview(data) {
+      return data.keys().hasAll(['reviewerId', 'revieweeId', 'requestId', 'rating'])
+        && data.reviewerId is string && data.reviewerId.size() <= 128
+        && data.revieweeId is string && data.revieweeId.size() <= 128
+        && data.requestId is string && data.requestId.size() <= 128
+        && data.rating is number && data.rating >= 1 && data.rating <= 5
+        && (!('voiceReviewUrl' in data) || (data.voiceReviewUrl is string && data.voiceReviewUrl.size() <= 1024))
+        && (!('createdAt' in data) || data.createdAt is timestamp);
+    }
+
+    function isValidVoiceMessage(data) {
+       return data.keys().hasAll(['jobId', 'senderId', 'audioUrl'])
+         && data.jobId is string && data.jobId.size() <= 128
+         && data.senderId is string && data.senderId.size() <= 128
+         && data.audioUrl is string && data.audioUrl.size() <= 1024
+         && (!('createdAt' in data) || data.createdAt is timestamp);
+    }
+
+    function isValidReport(data) {
+       return data.keys().hasAll(['reporterId', 'targetUserId', 'reason'])
+         && data.reporterId is string && data.reporterId.size() <= 128
+         && data.targetUserId is string && data.targetUserId.size() <= 128
+         && data.reason is string && data.reason.size() <= 1024
+         && (!('requestId' in data) || (data.requestId is string && data.requestId.size() <= 128))
+         && (!('createdAt' in data) || data.createdAt is timestamp);
+    }
+
+    match /users/{uid} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
+      allow create: if isOwner(uid) && isValidId(uid) && isValidUser(incoming())
+        && incoming().uid == request.auth.uid
+        && incoming().createdAt == request.time
+        && (!('isPremium' in incoming()) || incoming().isPremium == false)
+        && (!('rating' in incoming()) || incoming().rating == 0)
+        && (!('reviewsCount' in incoming()) || incoming().reviewsCount == 0);
+                       
+      allow update: if (isOwner(uid) && isValidId(uid) && isValidUser(incoming())
+        && incoming().uid == existing().uid
+        && incoming().role == existing().role
+        && incoming().status == existing().status
+        && (!('rating' in incoming()) || ('rating' in existing() && incoming().rating == existing().rating) || (!('rating' in existing()) && incoming().rating == 0))
+        && (!('reviewsCount' in incoming()) || ('reviewsCount' in existing() && incoming().reviewsCount == existing().reviewsCount) || (!('reviewsCount' in existing()) && incoming().reviewsCount == 0))
+        && (!('isPremium' in incoming()) || ('isPremium' in existing() && incoming().isPremium == existing().isPremium) || (!('isPremium' in existing()) && incoming().isPremium == false))
+        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'location', 'lat', 'lng', 'geohash', 'isBarakaActive', 'voiceProfileUrl', 'craftId', 'fcmToken', 'createdAt', 'rating', 'reviewsCount', 'isPremium']))
+        || 
+        (isSignedIn() && isValidId(uid) 
+         && incoming().uid == existing().uid 
+         && incoming().diff(existing()).affectedKeys().hasOnly(['rating', 'reviewsCount']));
+    }
+
     match /requests/{requestId} {
       allow get: if isSignedIn();
       allow list: if isSignedIn();
-      allow create: if isSignedIn() && request.resource.data.customerId == request.auth.uid;
-      allow update: if isSignedIn() && (
-        // Customer assigning a worker
-        (resource.data.customerId == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasAny(['status', 'workerId', 'isPremium'])) ||
-        // Worker confirming completion
-        (resource.data.workerId == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasAny(['status', 'workerConfirmedCompletion']))
-      );
+      allow create: if isSignedIn() && isValidId(requestId) && isValidRequest(incoming())
+        && incoming().customerId == request.auth.uid
+        && incoming().status == 'open'
+        && incoming().createdAt == request.time
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+      
+      allow update: if isSignedIn() && isValidId(requestId) && isValidRequest(incoming())
+        && incoming().customerId == existing().customerId
+        && incoming().craftId == existing().craftId
+        && incoming().voiceRequestUrl == existing().voiceRequestUrl
+        && (
+           (isOwner(existing().customerId) && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'workerId'])) ||
+           (isOwner(existing().workerId) && incoming().diff(existing()).affectedKeys().hasOnly(['workerConfirmedCompletion'])) ||
+           (isOwner(existing().customerId) && incoming().diff(existing()).affectedKeys().hasOnly(['status']))
+        );
     }
 
-    // --- Responses ---
     match /responses/{responseId} {
-      allow get: if isSignedIn();
-      allow list: if isSignedIn() && (
-        // Customer who owns the request or worker who sent the bid
-        resource.data.workerId == request.auth.uid || 
-        get(/databases/$(database)/documents/requests/$(resource.data.requestId)).data.customerId == request.auth.uid
-      );
-      allow create: if isSignedIn() && request.resource.data.workerId == request.auth.uid;
-      allow update: if isSignedIn() && (
-        // Customer accepting/rejecting
-        get(/databases/$(database)/documents/requests/$(resource.data.requestId)).data.customerId == request.auth.uid ||
-        resource.data.workerId == request.auth.uid
-      );
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(responseId) && isValidResponse(incoming())
+        && incoming().workerId == request.auth.uid
+        && incoming().createdAt == request.time
+        && exists(/databases/$(database)/documents/requests/$(incoming().requestId));
+        
+      allow update: if isSignedIn() && isValidId(responseId) && isValidResponse(incoming())
+        && incoming().requestId == existing().requestId
+        && incoming().workerId == existing().workerId
+        && incoming().voiceResponseUrl == existing().voiceResponseUrl
+        && get(/databases/$(database)/documents/requests/$(existing().requestId)).data.customerId == request.auth.uid
+        && incoming().diff(existing()).affectedKeys().hasOnly(['status']);
     }
 
-    // --- Reviews ---
     match /reviews/{reviewId} {
       allow read: if isSignedIn();
-      allow create: if isSignedIn() && request.resource.data.reviewerId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(reviewId) && isValidReview(incoming())
+        && incoming().reviewerId == request.auth.uid
+        && incoming().createdAt == request.time
+        && exists(/databases/$(database)/documents/users/$(incoming().revieweeId))
+        && exists(/databases/$(database)/documents/requests/$(incoming().requestId))
+        && get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.customerId == request.auth.uid;
+    }
+
+    match /messages/{messageId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(messageId) && isValidVoiceMessage(incoming())
+        && incoming().senderId == request.auth.uid
+        && incoming().createdAt == request.time
+        && exists(/databases/$(database)/documents/requests/$(incoming().jobId))
+        && (
+            get(/databases/$(database)/documents/requests/$(incoming().jobId)).data.customerId == request.auth.uid ||
+            get(/databases/$(database)/documents/requests/$(incoming().jobId)).data.workerId == request.auth.uid
+        );
+    }
+
+    match /reports/{reportId} {
+      allow create: if isSignedIn() && isValidId(reportId) && isValidReport(incoming())
+        && incoming().reporterId == request.auth.uid
+        && incoming().createdAt == request.time;
     }
   }
 }

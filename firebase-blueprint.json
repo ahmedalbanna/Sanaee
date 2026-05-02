@@ -27,6 +27,7 @@
         "voiceProfileUrl": { "type": "string", "description": "Worker audio intro" },
         "craftId": { "type": "string", "description": "Specialization for workers" },
         "isBarakaActive": { "type": "boolean" },
+        "fcmToken": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["uid", "name", "role", "status"]
@@ -53,6 +54,7 @@
         "isPremium": { "type": "boolean", "description": "Urgent/Paid boost" },
         "urgency": { "type": "string", "enum": ["normal", "emergency"] },
         "workerId": { "type": "string", "description": "Assigned worker" },
+        "workerConfirmedCompletion": { "type": "boolean" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["customerId", "voiceRequestUrl", "craftId", "status"]
@@ -83,6 +85,31 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["reviewerId", "revieweeId", "requestId", "rating"]
+    },
+    "VoiceMessage": {
+      "title": "VoiceMessage",
+      "description": "Voice messages between a customer and an assigned worker.",
+      "type": "object",
+      "properties": {
+        "jobId": { "type": "string" },
+        "senderId": { "type": "string" },
+        "audioUrl": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["jobId", "senderId", "audioUrl"]
+    },
+    "Report": {
+      "title": "Report",
+      "description": "User reporting.",
+      "type": "object",
+      "properties": {
+        "reporterId": { "type": "string" },
+        "targetUserId": { "type": "string" },
+        "reason": { "type": "string" },
+        "requestId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["reporterId", "targetUserId", "reason"]
     }
   },
   "firestore": {
@@ -92,15 +119,23 @@
     },
     "/requests/{requestId}": {
       "schema": "Request",
-      "description": "Customer service requests."
+      "description": "Customer service jobs."
     },
     "/responses/{responseId}": {
       "schema": "Response",
-      "description": "Worker bids on requests."
+      "description": "Worker bids on jobs."
     },
     "/reviews/{reviewId}": {
       "schema": "Review",
       "description": "End-of-job reviews."
+    },
+    "/messages/{messageId}": {
+      "schema": "VoiceMessage",
+      "description": "Negotiation / communication messages between customer and worker."
+    },
+    "/reports/{reportId}": {
+      "schema": "Report",
+      "description": "User reports for fraud or bad behavior."
     }
   }
 }

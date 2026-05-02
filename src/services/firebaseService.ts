@@ -372,6 +372,45 @@ export const subscribeToResponses = (requestId: string, callback: (responses: Jo
   });
 };
 
+export interface VoiceMessage {
+  id?: string;
+  jobId: string;
+  senderId: string;
+  audioUrl: string;
+  createdAt?: { seconds: number; nanoseconds: number } | string | Date | null;
+}
+
+export const subscribeToJobMessages = (jobId: string, callback: (messages: VoiceMessage[]) => void) => {
+  const path = 'messages';
+  const q = query(
+    collection(db, 'messages'),
+    where('jobId', '==', jobId),
+    orderBy('createdAt', 'asc') // chronological
+  );
+  
+  return onSnapshot(q, (snapshot) => {
+    callback(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as VoiceMessage)));
+  }, (error) => {
+    handleFirestoreError(error, OperationType.LIST, path);
+  });
+};
+
+export const addVoiceMessage = async (jobId: string, audioUrl: string) => {
+  if (!auth.currentUser) throw new Error('Not authenticated');
+  const path = 'messages';
+  try {
+    const docRef = await addDoc(collection(db, 'messages'), {
+      jobId,
+      senderId: auth.currentUser.uid,
+      audioUrl,
+      createdAt: serverTimestamp()
+    });
+    return docRef.id;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, path);
+  }
+};
+
 // --- Review Services ---
 
 export interface Review {
@@ -386,7 +425,8 @@ export interface Review {
 
 export const addReview = async (revieweeId: string, requestId: string, voiceReviewUrl: string, rating: number) => {
   if (!auth.currentUser) throw new Error('Not authenticated');
-  const path = 'reviews';
+  
+  let docRefId = '';
   try {
     const docRef = await addDoc(collection(db, 'reviews'), {
       reviewerId: auth.currentUser.uid,
@@ -396,7 +436,12 @@ export const addReview = async (revieweeId: string, requestId: string, voiceRevi
       rating,
       createdAt: serverTimestamp()
     });
-    
+    docRefId = docRef.id;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, 'reviews - addDoc');
+  }
+  
+  try {
     // Update reviewee rating denormalized
     const userRef = doc(db, 'users', revieweeId);
     const userSnap = await getDoc(userRef);
@@ -409,10 +454,11 @@ export const addReview = async (revieweeId: string, requestId: string, voiceRevi
         rating: newRating
       });
     }
-    return docRef.id;
   } catch (error) {
-    handleFirestoreError(error, OperationType.CREATE, path);
+    handleFirestoreError(error, OperationType.UPDATE, 'users - updateDoc');
   }
+
+  return docRefId;
 };
 
 export const getWorkerReviews = async (workerId: string) => {
