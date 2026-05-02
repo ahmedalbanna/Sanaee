@@ -12,8 +12,7 @@ import {
   updateDoc,
   onSnapshot
 } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, auth, storage } from '../lib/firebase';
+import { db, auth } from '../lib/firebase';
 
 enum OperationType {
   CREATE = 'create',
@@ -53,15 +52,20 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
 // --- Storage Services ---
 
 export const uploadAudio = async (blob: Blob, folder: string) => {
-  const fileName = `${Date.now()}-${auth.currentUser?.uid}.webm`;
-  const storageRef = ref(storage, `${folder}/${fileName}`);
-  try {
-    await uploadBytes(storageRef, blob);
-    return await getDownloadURL(storageRef);
-  } catch (error) {
-    console.error('Upload Error:', error);
-    throw error;
+  const formData = new FormData();
+  formData.append('audio', blob, 'audio.webm');
+  
+  const response = await fetch('/api/upload-audio', {
+    method: 'POST',
+    body: formData,
+  });
+  
+  if (!response.ok) {
+    throw new Error('فشل رفع الملف الصوتي');
   }
+  
+  const data = await response.json();
+  return data.url;
 };
 
 export const getWorkers = async () => {
@@ -93,14 +97,23 @@ export const saveWorkerProfile = async (profile: unknown) => {
   if (!auth.currentUser) throw new Error('Not authenticated');
   const path = `workers/${auth.currentUser.uid}`;
   try {
-    await setDoc(doc(db, 'workers', auth.currentUser.uid), {
-      ...(profile as object),
-      userId: auth.currentUser.uid,
-      createdAt: serverTimestamp(),
-      rating: 5.0,
-      reviewsCount: 0,
-      isBarakaActive: false
-    });
+    const workerRef = doc(db, 'workers', auth.currentUser.uid);
+    const workerSnap = await getDoc(workerRef);
+    
+    if (workerSnap.exists()) {
+      await updateDoc(workerRef, {
+        ...(profile as object)
+      });
+    } else {
+      await setDoc(workerRef, {
+        ...(profile as object),
+        userId: auth.currentUser.uid,
+        createdAt: serverTimestamp(),
+        rating: 5.0,
+        reviewsCount: 0,
+        isBarakaActive: false
+      });
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }

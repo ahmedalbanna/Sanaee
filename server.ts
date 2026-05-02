@@ -1,6 +1,15 @@
 import express from 'express';
 import path from 'path';
 import Stripe from 'stripe';
+import multer from 'multer';
+import fs from 'fs';
+
+const uploadDir = path.join(process.cwd(), 'public/audio');
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+
+const upload = multer({ dest: 'public/audio/' });
 
 async function startServer() {
   const app = express();
@@ -49,6 +58,22 @@ async function startServer() {
       res.status(500).json({ error: message });
     }
   });
+
+  // Upload Audio
+  app.post('/api/upload-audio', upload.single('audio'), (req, res) => {
+    if (!req.file) {
+      res.status(400).send('No file uploaded.');
+      return;
+    }
+    // Rename to have .webm extension, essential for audio playback
+    const oldPath = req.file.path;
+    const newPath = req.file.path + '.webm';
+    fs.renameSync(oldPath, newPath);
+    res.json({ url: `/audio/${req.file.filename}.webm` });
+  });
+
+  // Serve static audio
+  app.use('/audio', express.static(path.join(process.cwd(), 'public/audio')));
 
   // --- Vite Middleware ---
   if (process.env.NODE_ENV !== 'production') {
