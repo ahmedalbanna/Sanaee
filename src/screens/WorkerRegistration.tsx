@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { motion } from 'motion/react';
-import { ArrowRight, Save, Info } from 'lucide-react';
+import { ArrowRight, Save, Info, MapPin } from 'lucide-react';
 import CraftSelector from '../components/CraftSelector';
 import VoiceRecorder from '../components/VoiceRecorder';
-import { saveWorkerProfile, uploadAudio } from '../services/firebaseService';
+import { saveWorkerProfile, uploadAudio, WorkerProfile } from '../services/firebaseService';
 
 interface WorkerRegistrationProps {
   onComplete: () => void;
@@ -12,15 +12,39 @@ interface WorkerRegistrationProps {
 
 export default function WorkerRegistration({ onComplete, onBack }: WorkerRegistrationProps) {
   const [step, setStep] = useState(1);
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<Partial<WorkerProfile>>({
     name: '',
-    phone: '',
     craftId: '',
     dailyRate: 5000,
     voiceProfileUrl: '',
-    location: { city: 'صنعاء', district: '' }
+    location: { city: 'صنعاء' },
+    lat: undefined,
+    lng: undefined,
+    role: 'worker'
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [locationStatus, setLocationStatus] = useState<'idle' | 'detecting' | 'found' | 'error'>('idle');
+
+  const detectLocation = () => {
+    if (!("geolocation" in navigator)) {
+      setLocationStatus('error');
+      return;
+    }
+    setLocationStatus('detecting');
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setFormData(prev => ({
+          ...prev,
+          lat: position.coords.latitude,
+          lng: position.coords.longitude
+        }));
+        setLocationStatus('found');
+      },
+      () => {
+        setLocationStatus('error');
+      }
+    );
+  };
 
   const handleVoiceComplete = async (blob: Blob) => {
     try {
@@ -129,6 +153,26 @@ export default function WorkerRegistration({ onComplete, onBack }: WorkerRegistr
                 />
               </div>
               
+              <div>
+                <label className="block text-sm font-bold mb-2 text-primary">تحديد موقعك لمطابقة الطلبات القريبة</label>
+                <button 
+                  onClick={detectLocation}
+                  className={`w-full flex items-center justify-center gap-3 p-4 rounded-2xl border-2 transition-all ${
+                    locationStatus === 'found' 
+                      ? 'border-green-500 bg-green-50 text-green-700' 
+                      : 'border-primary/20 bg-white text-secondary hover:border-primary/50'
+                  }`}
+                >
+                  <MapPin className={locationStatus === 'detecting' ? 'animate-bounce' : ''} />
+                  <span className="font-bold">
+                    {locationStatus === 'idle' && 'أين أنت الآن؟ (تحديد الموقع)'}
+                    {locationStatus === 'detecting' && 'جاري البحث عنك...'}
+                    {locationStatus === 'found' && 'تم تحديد موقعك بنجاح! ✅'}
+                    {locationStatus === 'error' && 'فشل التحديد، فعل الـ GPS وحاول'}
+                  </span>
+                </button>
+              </div>
+
               <button 
                 onClick={handleSave}
                 disabled={isSubmitting}

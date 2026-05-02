@@ -10,9 +10,12 @@ import {
   serverTimestamp,
   setDoc,
   updateDoc,
-  onSnapshot
+  onSnapshot,
+  startAt,
+  endAt
 } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
+import { geohashForLocation, geohashQueryBounds, distanceBetween } from 'geofire-common';
 
 enum OperationType {
   CREATE = 'create',
@@ -46,12 +49,13 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
     path
   }
   console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo), { cause: error });
 }
 
 // --- Storage Services ---
 
 export const uploadAudio = async (blob: Blob) => {
+
   const formData = new FormData();
   formData.append('audio', blob, 'audio.webm');
   
@@ -68,50 +72,68 @@ export const uploadAudio = async (blob: Blob) => {
   return data.url;
 };
 
-export const getWorkers = async () => {
-  const path = 'workers';
-  try {
-    const q = query(collection(db, 'workers'));
-    const snapshot = await getDocs(q);
-    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-  } catch (error) {
-    handleFirestoreError(error, OperationType.LIST, path);
-  }
-};
+// --- User Profile Services ---
 
-export interface WorkerProfile {
-  id?: string;
-  userId?: string;
-  name?: string;
-  craftId?: string;
-  isBarakaActive?: boolean;
-  isAvailable?: boolean;
-  dailyRate?: number;
+export interface UserProfile {
+  uid: string;
+  name: string;
+  phone?: string;
+  role: 'customer' | 'worker';
+  location?: { city: string; district?: string };
+  lat?: number;
+  lng?: number;
+  geohash?: string;
   rating?: number;
   reviewsCount?: number;
+  status: 'active' | 'suspended' | 'banned';
+  isPremium?: boolean;
+  voiceFingerprintId?: string;
   voiceProfileUrl?: string;
-  location?: { city?: string };
+  craftId?: string;
+  isBarakaActive?: boolean;
+  createdAt?: { seconds: number; nanoseconds: number } | string | Date | null;
+  fcmToken?: string;
+  reportsCount?: number;
 }
 
-export const saveWorkerProfile = async (profile: unknown) => {
+// Alias for backwards compatibility with UI
+export type WorkerProfile = UserProfile;
+
+export const saveUserProfile = async (profile: Partial<UserProfile>) => {
   if (!auth.currentUser) throw new Error('Not authenticated');
-  const path = `workers/${auth.currentUser.uid}`;
+  const path = `users/${auth.currentUser.uid}`;
+  
+  let geoHashData = {};
+  if (profile.lat && profile.lng) {
+    geoHashData = {
+      geohash: geohashForLocation([profile.lat, profile.lng]),
+      lat: profile.lat,
+      lng: profile.lng
+    };
+  }
+
   try {
-    const workerRef = doc(db, 'workers', auth.currentUser.uid);
-    const workerSnap = await getDoc(workerRef);
+    const userRef = doc(db, 'users', auth.currentUser.uid);
+    const userSnap = await getDoc(userRef);
     
-    if (workerSnap.exists()) {
-      await updateDoc(workerRef, {
-        ...(profile as object)
-      });
+    const baseData = {
+      ...profile,
+      ...geoHashData
+    };
+
+    if (userSnap.exists()) {
+      await updateDoc(userRef, baseData);
     } else {
-      await setDoc(workerRef, {
-        ...(profile as object),
-        userId: auth.currentUser.uid,
+      await setDoc(userRef, {
+        ...baseData,
+        uid: auth.currentUser.uid,
         createdAt: serverTimestamp(),
         rating: 5.0,
         reviewsCount: 0,
-        isBarakaActive: false
+        reportsCount: 0,
+        status: 'active',
+        isBarakaActive: false,
+        isPremium: false
       });
     }
   } catch (error) {
@@ -119,11 +141,75 @@ export const saveWorkerProfile = async (profile: unknown) => {
   }
 };
 
+export const updateFcmToken = async (token: string) => {
+  if (!auth.currentUser) return;
+  try {
+    await updateDoc(doc(db, 'users', auth.currentUser.uid), {
+      fcmToken: token
+    });
+  } catch (error) {
+    console.warn('Failed to save FCM token:', error);
+  }
+};
+
+// --- Report System ---
+
+export const reportUser = async (targetUserId: string, reason: string, requestId?: string) => {
+  if (!auth.currentUser) throw new Error('Not authenticated');
+  const path = 'reports';
+  try {
+    await addDoc(collection(db, 'reports'), {
+      reporterId: auth.currentUser.uid,
+      targetUserId,
+      reason,
+      requestId,
+      createdAt: serverTimestamp()
+    });
+
+    // Auto-ban logic simulation (In production this should be a Cloud Function)
+    const targetRef = doc(db, 'users', targetUserId);
+    const targetSnap = await getDoc(targetRef);
+    if (targetSnap.exists()) {
+      const data = targetSnap.data();
+      const newReportsCount = (data.reportsCount || 0) + 1;
+      
+      const updates: Record<string, string | number> = {
+        reportsCount: newReportsCount
+      };
+
+      if (newReportsCount >= 3) {
+        updates.status = 'banned';
+      }
+
+      await updateDoc(targetRef, updates);
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, path);
+  }
+};
+
+// Alias for backwards compatibility
+export const saveWorkerProfile = saveUserProfile;
+
+export const getUserProfile = async (uid: string) => {
+  const path = `users/${uid}`;
+  try {
+    const docRef = doc(db, 'users', uid);
+    const docSnap = await getDoc(docRef);
+    return docSnap.exists() ? docSnap.data() as UserProfile : null;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, path);
+  }
+};
+
+// Alias for backwards compatibility
+export const getWorkerProfile = getUserProfile;
+
 export const updateWorkerBaraka = async (isActive: boolean) => {
   if (!auth.currentUser) throw new Error('Not authenticated');
-  const path = `workers/${auth.currentUser.uid}`;
+  const path = `users/${auth.currentUser.uid}`;
   try {
-    await updateDoc(doc(db, 'workers', auth.currentUser.uid), {
+    await updateDoc(doc(db, 'users', auth.currentUser.uid), {
       isBarakaActive: isActive
     });
   } catch (error) {
@@ -131,42 +217,66 @@ export const updateWorkerBaraka = async (isActive: boolean) => {
   }
 };
 
-export const getWorkerProfile = async (uid: string) => {
-  const path = `workers/${uid}`;
-  try {
-    const docRef = doc(db, 'workers', uid);
-    const docSnap = await getDoc(docRef);
-    return docSnap.exists() ? docSnap.data() : null;
-  } catch (error) {
-    handleFirestoreError(error, OperationType.GET, path);
-  }
-};
+// --- Request (Job) Services ---
 
-// --- Job Services ---
+export interface JobRequest {
+  id?: string;
+  customerId: string;
+  voiceRequestUrl: string;
+  craftId: string;
+  location?: { city: string; district?: string };
+  lat?: number;
+  lng?: number;
+  geohash?: string;
+  status: 'open' | 'assigned' | 'completed' | 'cancelled';
+  isPremium: boolean;
+  urgency: 'normal' | 'emergency';
+  workerId?: string;
+  createdAt?: { seconds: number; nanoseconds: number } | string | Date | null;
+}
 
-export const createJobRequest = async (job: unknown) => {
+// Alias for backwards compatibility
+export type Job = JobRequest;
+
+export const createJobRequest = async (request: Partial<JobRequest>) => {
   if (!auth.currentUser) throw new Error('Not authenticated');
-  const path = 'jobs';
+  const path = 'requests';
+  
+  let geoHashData = {};
+  if (request.lat && request.lng) {
+    geoHashData = {
+      geohash: geohashForLocation([request.lat, request.lng]),
+      lat: request.lat,
+      lng: request.lng
+    };
+  }
+
   try {
-    const docRef = await addDoc(collection(db, 'jobs'), {
-      ...(job as object),
+    const baseData: Record<string, unknown> = {
+      ...request,
+      ...geoHashData,
       customerId: auth.currentUser.uid,
       status: 'open',
       createdAt: serverTimestamp(),
-      isPremium: false,
-      customerConfirmedCompletion: false,
-      workerConfirmedCompletion: false
-    });
+      isPremium: false
+    };
+
+    // Remove undefined values to prevent Firestore errors
+    const cleanedData = Object.fromEntries(
+      Object.entries(baseData).filter(([, value]) => value !== undefined)
+    );
+
+    const docRef = await addDoc(collection(db, 'requests'), cleanedData);
     return docRef.id;
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, path);
   }
 };
 
-export const markJobPremium = async (jobId: string) => {
-  const path = `jobs/${jobId}`;
+export const markJobPremium = async (requestId: string) => {
+  const path = `requests/${requestId}`;
   try {
-    await updateDoc(doc(db, 'jobs', jobId), {
+    await updateDoc(doc(db, 'requests', requestId), {
       isPremium: true
     });
   } catch (error) {
@@ -174,11 +284,11 @@ export const markJobPremium = async (jobId: string) => {
   }
 };
 
-export const assignWorkerToJob = async (jobId: string) => {
+export const assignWorkerToJob = async (requestId: string) => {
   if (!auth.currentUser) throw new Error('Not authenticated');
-  const path = `jobs/${jobId}`;
+  const path = `requests/${requestId}`;
   try {
-    await updateDoc(doc(db, 'jobs', jobId), {
+    await updateDoc(doc(db, 'requests', requestId), {
       status: 'assigned',
       workerId: auth.currentUser.uid
     });
@@ -187,47 +297,114 @@ export const assignWorkerToJob = async (jobId: string) => {
   }
 };
 
-export const confirmJobCompletion = async (jobId: string, role: 'customer' | 'worker') => {
-  const path = `jobs/${jobId}`;
+export const confirmJobCompletion = async (requestId: string, role: 'customer' | 'worker') => {
+  const path = `requests/${requestId}`;
   try {
-    const jobSnap = await getDoc(doc(db, 'jobs', jobId));
-    if (!jobSnap.exists()) return;
-    const jobData = jobSnap.data();
+    const docRef = doc(db, 'requests', requestId);
+    const snap = await getDoc(docRef);
+    if (!snap.exists()) return;
+    const data = snap.data();
 
     const updates: Record<string, unknown> = {};
     if (role === 'customer') {
       updates.customerConfirmedCompletion = true;
-      if (jobData.workerConfirmedCompletion) updates.status = 'completed';
+      if (data.workerConfirmedCompletion) updates.status = 'completed';
     } else {
       updates.workerConfirmedCompletion = true;
-      if (jobData.customerConfirmedCompletion) updates.status = 'completed';
+      if (data.customerConfirmedCompletion) updates.status = 'completed';
     }
 
-    await updateDoc(doc(db, 'jobs', jobId), updates);
+    await updateDoc(docRef, updates);
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, path);
   }
 };
 
-export const addReview = async (workerId: string, jobId: string, voiceReviewUrl: string, rating: number) => {
+// --- Response (Bid) Services ---
+
+export interface JobResponse {
+  id?: string;
+  requestId: string;
+  workerId: string;
+  voiceResponseUrl: string;
+  status: 'pending' | 'accepted' | 'rejected';
+  createdAt?: { seconds: number; nanoseconds: number } | string | Date | null;
+  // Extra fields for UI convenience
+  workerName?: string;
+  workerRating?: number;
+}
+
+// Alias
+export type JobBid = JobResponse;
+
+export const addJobBid = async (requestId: string, voiceResponseUrl: string, profile: WorkerProfile) => {
   if (!auth.currentUser) throw new Error('Not authenticated');
-  const path = `workers/${workerId}/reviews`;
+  const path = 'responses';
   try {
-    const docRef = await addDoc(collection(db, `workers/${workerId}/reviews`), {
-      customerId: auth.currentUser.uid,
-      jobId,
+    const docRef = await addDoc(collection(db, 'responses'), {
+      requestId,
+      workerId: auth.currentUser.uid,
+      voiceResponseUrl,
+      status: 'pending',
+      createdAt: serverTimestamp(),
+      // Denormalized for convenience
+      workerName: profile.name,
+      workerRating: profile.rating
+    });
+    return docRef.id;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, path);
+  }
+};
+
+export const subscribeToResponses = (requestId: string, callback: (responses: JobResponse[]) => void) => {
+  const path = 'responses';
+  const q = query(
+    collection(db, 'responses'),
+    where('requestId', '==', requestId),
+    orderBy('createdAt', 'desc')
+  );
+  
+  return onSnapshot(q, (snapshot) => {
+    callback(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as JobResponse)));
+  }, (error) => {
+    handleFirestoreError(error, OperationType.LIST, path);
+  });
+};
+
+// --- Review Services ---
+
+export interface Review {
+  id?: string;
+  reviewerId: string;
+  revieweeId: string;
+  requestId: string;
+  rating: number;
+  voiceReviewUrl: string;
+  createdAt?: { seconds: number; nanoseconds: number } | string | Date | null;
+}
+
+export const addReview = async (revieweeId: string, requestId: string, voiceReviewUrl: string, rating: number) => {
+  if (!auth.currentUser) throw new Error('Not authenticated');
+  const path = 'reviews';
+  try {
+    const docRef = await addDoc(collection(db, 'reviews'), {
+      reviewerId: auth.currentUser.uid,
+      revieweeId,
+      requestId,
       voiceReviewUrl,
       rating,
       createdAt: serverTimestamp()
     });
-    // We should also increment worker reviews count and avg rating, but for this demo, we'll keep it simple or do it via cloud function.
-    // For now we will manually update the worker document
-    const workerSnap = await getDoc(doc(db, 'workers', workerId));
-    if (workerSnap.exists()) {
-      const wData = workerSnap.data();
-      const newCount = (wData.reviewsCount || 0) + 1;
-      const newRating = ((wData.rating * (wData.reviewsCount || 0)) + rating) / newCount;
-      await updateDoc(doc(db, 'workers', workerId), {
+    
+    // Update reviewee rating denormalized
+    const userRef = doc(db, 'users', revieweeId);
+    const userSnap = await getDoc(userRef);
+    if (userSnap.exists()) {
+      const data = userSnap.data() as UserProfile;
+      const newCount = (data.reviewsCount || 0) + 1;
+      const newRating = ((data.rating || 5.0) * (data.reviewsCount || 0) + rating) / newCount;
+      await updateDoc(userRef, {
         reviewsCount: newCount,
         rating: newRating
       });
@@ -239,127 +416,66 @@ export const addReview = async (workerId: string, jobId: string, voiceReviewUrl:
 };
 
 export const getWorkerReviews = async (workerId: string) => {
-  const path = `workers/${workerId}/reviews`;
+  const path = 'reviews';
   try {
-    const q = query(collection(db, path), orderBy('createdAt', 'desc'));
-    const snapshot = await getDocs(q);
-    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-  } catch (error) {
-    handleFirestoreError(error, OperationType.LIST, path);
-  }
-};
-
-export const getOpenJobs = async (craftId?: string) => {
-  const path = 'jobs';
-  try {
-    let q = query(
-      collection(db, 'jobs'), 
-      where('status', '==', 'open'),
+    const q = query(
+      collection(db, 'reviews'),
+      where('revieweeId', '==', workerId),
       orderBy('createdAt', 'desc')
     );
-    if (craftId) {
-      q = query(q, where('craftId', '==', craftId));
-    }
-    const querySnapshot = await getDocs(q);
-    return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Review));
   } catch (error) {
     handleFirestoreError(error, OperationType.LIST, path);
   }
 };
 
-export interface JobBid {
-  id?: string;
-  workerId: string;
-  workerName: string;
-  workerRating: number;
-  voiceBidUrl: string;
-  createdAt: unknown;
-}
+// --- Real-time Subscriptions ---
 
-export interface Job {
-  id?: string;
-  customerId?: string;
-  workerId?: string;
-  craftId?: string;
-  status?: string;
-  isPremium?: boolean;
-  urgency?: string;
-  voiceRequestUrl?: string;
-  additionalVoiceUrls?: string[];
-  customerConfirmedCompletion?: boolean;
-  workerConfirmedCompletion?: boolean;
-  createdAt?: unknown;
-  bids?: JobBid[];
-}
-
-export const addJobBid = async (jobId: string, voiceBidUrl: string, profile: WorkerProfile) => {
-  if (!auth.currentUser) throw new Error('Not authenticated');
-  const path = `jobs/${jobId}`;
-  try {
-    const jobRef = doc(db, 'jobs', jobId);
-    const snap = await getDoc(jobRef);
-    if (!snap.exists()) return;
-    
-    const bids = snap.data().bids || [];
-    const newBid: JobBid = {
-      workerId: auth.currentUser.uid,
-      workerName: profile.name || 'حرفي',
-      workerRating: profile.rating || 5,
-      voiceBidUrl,
-      createdAt: new Date().toISOString() // Using simple ISO for simpler bid sorting if needed
-    };
-    
-    await updateDoc(jobRef, {
-      bids: [...bids, newBid]
-    });
-  } catch (error) {
-    handleFirestoreError(error, OperationType.UPDATE, path);
-  }
-};
-
-export const addAdditionalVoiceToJob = async (jobId: string, url: string) => {
-  const path = `jobs/${jobId}`;
-  try {
-    const jobRef = doc(db, 'jobs', jobId);
-    const snap = await getDoc(jobRef);
-    if (!snap.exists()) return;
-    const currentUrls = snap.data().additionalVoiceUrls || [];
-    await updateDoc(jobRef, {
-      additionalVoiceUrls: [...currentUrls, url]
-    });
-  } catch (error) {
-    handleFirestoreError(error, OperationType.UPDATE, path);
-  }
-};
-
-export const subscribeToJobsAll = (callback: (jobs: Job[]) => void) => {
-  const path = 'jobs';
+export const subscribeToJobsAll = (callback: (jobs: JobRequest[]) => void) => {
+  const path = 'requests';
   const q = query(
-    collection(db, 'jobs'),
+    collection(db, 'requests'),
     orderBy('createdAt', 'desc')
   );
   
   return onSnapshot(q, (snapshot) => {
-    callback(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    callback(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as JobRequest)));
   }, (error) => {
     handleFirestoreError(error, OperationType.LIST, path);
   });
 };
 
-export const subscribeToJobs = (callback: (jobs: unknown[]) => void, craftId?: string) => {
-  const path = 'jobs';
-  let q = query(
-    collection(db, 'jobs'), 
-    where('status', '==', 'open'),
-    orderBy('createdAt', 'desc')
-  );
-  if (craftId) {
-    q = query(q, where('craftId', '==', craftId));
+export const getJobsNearby = async (center: [number, number], radiusInM: number, craftId?: string) => {
+  const bounds = geohashQueryBounds(center, radiusInM);
+  const promises = [];
+  for (const b of bounds) {
+    const q = query(
+      collection(db, 'requests'),
+      where('status', '==', 'open'),
+      orderBy('geohash'),
+      startAt(b[0]),
+      endAt(b[1])
+    );
+    promises.push(getDocs(q));
   }
-  
-  return onSnapshot(q, (snapshot) => {
-    callback(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-  }, (error) => {
-    handleFirestoreError(error, OperationType.LIST, path);
-  });
+
+  const snapshots = await Promise.all(promises);
+  const matchingDocs: (JobRequest & { distance: number })[] = [];
+
+  for (const snap of snapshots) {
+    for (const d of snap.docs) {
+      const lat = d.get('lat');
+      const lng = d.get('lng');
+      if (lat && lng) {
+        const distance = distanceBetween([lat, lng], center) * 1000;
+        if (distance <= radiusInM) {
+          if (!craftId || d.get('craftId') === craftId) {
+            matchingDocs.push({ id: d.id, ...d.data() as JobRequest, distance });
+          }
+        }
+      }
+    }
+  }
+  return matchingDocs.sort((a, b) => (a.distance || 0) - (b.distance || 0));
 };

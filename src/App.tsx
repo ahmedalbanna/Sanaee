@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { auth } from './lib/firebase';
-import { getWorkerProfile, markJobPremium } from './services/firebaseService';
+import { auth, getFirebaseMessaging } from './lib/firebase';
+import { getToken } from 'firebase/messaging';
+import { getWorkerProfile, markJobPremium, WorkerProfile, updateFcmToken } from './services/firebaseService';
 import Navbar from './layout/Navbar';
 import Landing from './screens/Landing';
 import WorkerRegistration from './screens/WorkerRegistration';
@@ -17,7 +18,7 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [screen, setScreen] = useState<Screen>('landing');
-  const [workerProfile, setWorkerProfile] = useState<unknown>(null);
+  const [workerProfile, setWorkerProfile] = useState<WorkerProfile | null>(null);
 
   useEffect(() => {
     // Check for Stripe redirect
@@ -41,6 +42,11 @@ export default function App() {
       setUser(u);
       if (u) {
         const profile = await getWorkerProfile(u.uid);
+        if (profile?.status === 'banned' && screen !== 'landing') {
+          // Allow them to see the banned UI which is inside the dashboard components
+          // or we could force a global banned screen here. 
+          // For now, let's keep it in the dashboard since it's already implemented there.
+        }
         setWorkerProfile(profile);
       } else {
         setWorkerProfile(null);
@@ -51,6 +57,26 @@ export default function App() {
 
     return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    const setupMessaging = async () => {
+      if (!user) return;
+      try {
+        const messaging = await getFirebaseMessaging();
+        if (messaging) {
+          const currentToken = await getToken(messaging, { 
+            vapidKey: 'YOUR_VAPID_KEY_HERE' // This should be in env
+          });
+          if (currentToken) {
+            await updateFcmToken(currentToken);
+          }
+        }
+      } catch (err) {
+        console.warn('Messaging setup failed:', err);
+      }
+    };
+    setupMessaging();
+  }, [user]);
 
   const navigate = (s: Screen) => setScreen(s);
 

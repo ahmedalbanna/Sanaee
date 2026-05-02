@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Hammer, Clock, MessageSquare, Star, Mic, Play, Trophy, User, CheckCircle } from 'lucide-react';
+import { Hammer, MessageSquare, Star, Mic, Play, Trophy, User, CheckCircle, MapPin, AlertOctagon } from 'lucide-react';
 import { subscribeToJobsAll, updateWorkerBaraka, confirmJobCompletion, addJobBid, uploadAudio, getWorkerReviews, Job, WorkerProfile } from '../services/firebaseService';
 import { auth } from '../lib/firebase';
+import { distanceBetween } from 'geofire-common';
 import VoiceRecorder from '../components/VoiceRecorder';
 import toast from 'react-hot-toast';
 
@@ -10,11 +11,11 @@ interface Review {
   id: string;
   rating: number;
   voiceReviewUrl?: string;
-  createdAt: any;
+  createdAt: { seconds: number; nanoseconds: number } | string | Date;
 }
 
 export default function WorkerDashboard({ profile }: { profile: WorkerProfile }) {
-  const [jobs, setJobs] = useState<Job[]>([]);
+  const [jobs, setJobs] = useState<(Job & { distance?: number })[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [activeTab, setActiveTab] = useState<'feed' | 'mine' | 'profile'>('feed');
   const [isBaraka, setIsBaraka] = useState(profile?.isBarakaActive || false);
@@ -25,7 +26,8 @@ export default function WorkerDashboard({ profile }: { profile: WorkerProfile })
 
   const playAlertSound = () => {
     if (!audioContextRef.current) {
-      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      audioContextRef.current = new AudioContextClass();
     }
     const ctx = audioContextRef.current;
     if (ctx.state === 'suspended') ctx.resume();
@@ -56,10 +58,16 @@ export default function WorkerDashboard({ profile }: { profile: WorkerProfile })
 
   useEffect(() => {
     const unsub = subscribeToJobsAll((allJobs) => {
-      const relevant = allJobs.filter(j => 
+      const relevant: (Job & { distance?: number })[] = allJobs.filter(j => 
         (j.status === 'open' && j.craftId === profile.craftId) || 
         j.workerId === auth.currentUser?.uid
-      );
+      ).map(j => {
+        if (j.lat && j.lng && profile.lat && profile.lng) {
+          const dist = distanceBetween([j.lat, j.lng], [profile.lat, profile.lng]);
+          return { ...j, distance: dist } as (Job & { distance: number });
+        }
+        return j as (Job & { distance?: number });
+      });
       
       let hasNewEmergency = false;
       relevant.forEach(job => {
@@ -80,8 +88,16 @@ export default function WorkerDashboard({ profile }: { profile: WorkerProfile })
       }
 
       relevant.sort((a, b) => {
+        // Emergency and Premium first
+        if (a.urgency === 'emergency' && b.urgency !== 'emergency') return -1;
+        if (a.urgency !== 'emergency' && b.urgency === 'emergency') return 1;
         if (a.isPremium && !b.isPremium) return -1;
         if (!a.isPremium && b.isPremium) return 1;
+        
+        // Then by distance
+        if (a.distance !== undefined && b.distance !== undefined) {
+          return a.distance - b.distance;
+        }
         return 0;
       });
       setJobs(relevant);
@@ -92,7 +108,25 @@ export default function WorkerDashboard({ profile }: { profile: WorkerProfile })
     }
 
     return () => unsub();
-  }, [profile.craftId]);
+  }, [profile.craftId, profile.lat, profile.lng]);
+
+  if (profile.status === 'banned') {
+    return (
+      <div className="min-h-[80vh] flex flex-col items-center justify-center p-8 text-center bg-sand">
+        <motion.div 
+          initial={{ scale: 0.5, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          className="w-24 h-24 bg-red-100 text-red-600 rounded-full flex items-center justify-center mb-6"
+        >
+          <AlertOctagon size={48} />
+        </motion.div>
+        <h1 className="text-3xl font-black text-secondary mb-4">هذا الحساب محظور ⛔</h1>
+        <p className="text-lg text-secondary/60 max-w-md font-bold">
+          لقد تلقينا عدة بلاغات بشأن هذا الحساب لمخالفة شروط الخدمة. تم تعليق حسابك نهائياً.
+        </p>
+      </div>
+    );
+  }
 
   const feedJobs = jobs.filter(j => j.status === 'open');
   const myJobs = jobs.filter(j => j.workerId === auth.currentUser?.uid);
@@ -192,9 +226,16 @@ export default function WorkerDashboard({ profile }: { profile: WorkerProfile })
                   
                   <div className="flex items-center gap-3 mb-6">
                     <div className="w-12 h-12 bg-sand rounded-2xl flex items-center justify-center text-primary">
-                      <Clock size={20} />
+                      <MapPin size={20} />
                     </div>
-                    <span className="font-bold text-secondary/60">منطقتك الآن</span>
+                    <div className="flex flex-col">
+                      <span className="font-bold text-secondary/60">
+                        {job.distance !== undefined 
+                          ? `على بعد ${(job.distance * 1000).toFixed(0)} متر` 
+                          : 'منطقتك الآن'}
+                      </span>
+                      <span className="text-xs text-secondary/40">صنعاء، اليمن</span>
+                    </div>
                   </div>
 
                   <div className="bg-sand p-6 rounded-[2rem] mb-8 border border-primary/5">

@@ -1,19 +1,102 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Disc, Hammer, Star } from 'lucide-react';
+import { AlertCircle, Disc, Hammer, Star } from 'lucide-react';
 import VoiceRecorder from '../components/VoiceRecorder';
 import CraftSelector from '../components/CraftSelector';
-import { createJobRequest, uploadAudio, subscribeToJobsAll, assignWorkerToJob, Job } from '../services/firebaseService';
+import { createJobRequest, uploadAudio, subscribeToJobsAll, assignWorkerToJob, Job, subscribeToResponses, JobResponse, reportUser } from '../services/firebaseService';
 import { auth } from '../lib/firebase';
 import toast from 'react-hot-toast';
+
+function JobBids({ jobId, onAccept }: { jobId: string, onAccept: () => void }) {
+  const [bids, setBids] = useState<JobResponse[]>([]);
+
+  useEffect(() => {
+    const unsub = subscribeToResponses(jobId, (newBids) => {
+      setBids(newBids);
+    });
+    return () => unsub();
+  }, [jobId]);
+
+  const handleReport = async (workerId: string) => {
+    const reason = prompt('لماذا تود الإبلاغ عن هذا الحرفي؟');
+    if (!reason) return;
+    try {
+      await reportUser(workerId, reason, jobId);
+      toast.success('تم إرسال بلاغك بنجاح. سنراجع الأمر فوراً.');
+    } catch {
+      toast.error('فشل إرسال البلاغ');
+    }
+  };
+
+  if (bids.length === 0) {
+    return (
+      <p className="text-secondary/40 font-bold p-4 bg-sand/50 rounded-2xl text-center italic">
+        جاري البحث عن أفضل الحرفيين حولك...
+      </p>
+    );
+  }
+
+  return (
+    <div className="grid gap-4">
+      {bids.map((bid, idx) => (
+        <motion.div 
+          key={bid.id || idx}
+          initial={{ opacity: 0, x: -20 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ delay: idx * 0.1 }}
+          className="bg-white border-2 border-primary/10 p-5 rounded-[2.5rem] flex flex-col sm:flex-row items-center gap-6 hover:border-primary transition-colors"
+        >
+          <div className="flex flex-col items-center gap-2">
+            <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center text-primary text-3xl">
+              👨‍🔧
+            </div>
+            <div className="flex items-center gap-1 text-gold">
+              <span className="font-black">{bid.workerRating?.toFixed(1) || 5.0}</span>
+              <Hammer size={14} fill="currentColor" />
+            </div>
+          </div>
+          
+          <div className="flex-1 text-center sm:text-right">
+            <h5 className="font-black text-lg mb-2">{bid.workerName}</h5>
+            <div className="bg-sand p-2 rounded-2xl inline-flex items-center gap-4">
+              <audio src={bid.voiceResponseUrl} controls className="h-10 w-48" />
+            </div>
+            <button 
+              onClick={() => handleReport(bid.workerId)}
+              className="mt-2 text-xs text-red-500 font-bold flex items-center gap-1 hover:underline mx-auto sm:mr-0 sm:ml-auto"
+            >
+              <AlertCircle size={12} />
+              إبلاغ عن الحرفي
+            </button>
+          </div>
+
+          <button 
+            onClick={onAccept}
+            className="bg-primary text-white font-black py-4 px-8 rounded-full shadow-lg hover:scale-105 active:scale-95 transition-all text-xl"
+          >
+            قبول واتصال
+          </button>
+        </motion.div>
+      ))}
+    </div>
+  );
+}
 
 export default function CustomerDashboard() {
   const [view, setView] = useState<'request' | 'list'>('request');
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedCraft, setSelectedCraft] = useState<string | null>(null);
+  const [userLocation, setUserLocation] = useState<{ lat: number, lng: number } | null>(null);
 
   useEffect(() => {
+    if ("geolocation" in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => setUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+        () => console.log("Location access denied")
+      );
+    }
+
     const unsub = subscribeToJobsAll((allJobs) => {
       const myJobs = allJobs.filter(j => j.customerId === auth.currentUser?.uid);
       setJobs(myJobs);
@@ -32,7 +115,10 @@ export default function CustomerDashboard() {
       await createJobRequest({
         craftId: selectedCraft,
         voiceRequestUrl: url,
-        urgency: 'normal'
+        urgency: 'normal',
+        lat: userLocation?.lat,
+        lng: userLocation?.lng,
+        status: 'open'
       });
       toast.success("تم إرسال طلبك بنجاح! انتظر ردود الحرفيين");
       setSelectedCraft(null);
@@ -42,6 +128,15 @@ export default function CustomerDashboard() {
       toast.error("فشل إرسال الطلب");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleAccept = async (jobId: string) => {
+    try {
+      await assignWorkerToJob(jobId);
+      toast.success('تم قبول العرض! الحرفي في طريقه إليك.');
+    } catch {
+      toast.error('حدث خطأ أثناء القبول');
     }
   };
 
@@ -170,51 +265,11 @@ export default function CustomerDashboard() {
                     {/* Bids Section */}
                     <div className="space-y-4">
                       <h4 className="font-black text-xl text-primary flex items-center gap-2">
-                        <Disc size={20} className={job.bids?.length ? 'animate-spin-slow' : ''} />
-                        رُدود الحرفيين المتاحة ({job.bids?.length || 0})
+                        <Disc size={20} className="animate-spin-slow" />
+                        رُدود الحرفيين المتاحة
                       </h4>
                       
-                      {(!job.bids || job.bids.length === 0) ? (
-                        <p className="text-secondary/40 font-bold p-4 bg-sand/50 rounded-2xl text-center italic">
-                          جاري البحث عن أفضل الحرفيين حولك...
-                        </p>
-                      ) : (
-                        <div className="grid gap-4">
-                          {job.bids.map((bid, idx) => (
-                            <motion.div 
-                              key={idx}
-                              initial={{ opacity: 0, x: -20 }}
-                              animate={{ opacity: 1, x: 0 }}
-                              transition={{ delay: idx * 0.1 }}
-                              className="bg-white border-2 border-primary/10 p-5 rounded-[2.5rem] flex flex-col sm:flex-row items-center gap-6 hover:border-primary transition-colors"
-                            >
-                              <div className="flex flex-col items-center gap-2">
-                                <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center text-primary text-3xl">
-                                  👨‍🔧
-                                </div>
-                                <div className="flex items-center gap-1 text-gold">
-                                  <span className="font-black">{bid.workerRating.toFixed(1)}</span>
-                                  <Hammer size={14} fill="currentColor" />
-                                </div>
-                              </div>
-                              
-                              <div className="flex-1 text-center sm:text-right">
-                                <h5 className="font-black text-lg mb-2">{bid.workerName}</h5>
-                                <div className="bg-sand p-2 rounded-2xl inline-flex items-center gap-4">
-                                  <audio src={bid.voiceBidUrl} controls className="h-10 w-48" />
-                                </div>
-                              </div>
-
-                              <button 
-                                onClick={() => assignWorkerToJob(job.id!)}
-                                className="bg-primary text-white font-black py-4 px-8 rounded-full shadow-lg hover:scale-105 active:scale-95 transition-all text-xl"
-                              >
-                                قبول واتصال
-                              </button>
-                            </motion.div>
-                          ))}
-                        </div>
-                      )}
+                      <JobBids jobId={job.id!} onAccept={() => handleAccept(job.id!)} />
                     </div>
                   </motion.div>
                 ))

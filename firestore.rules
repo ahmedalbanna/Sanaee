@@ -1,93 +1,67 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // 0. Global Safety Net
+    // Default deny
     match /{document=**} {
       allow read, write: if false;
     }
 
-    // --- Helpers ---
-    function isSignedIn() { return request.auth != null; }
-    function isVerified() { return isSignedIn() && request.auth.token.email_verified == true; }
-    function incoming() { return request.resource.data; }
-    function existing() { return resource.data; }
-    function isOwner(uid) { return isSignedIn() && request.auth.uid == uid; }
-    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
-
-    // --- Validation Blueprints ---
-    function isValidWorker(data) {
-      return data.keys().hasAll(['userId', 'name', 'craftId', 'createdAt']) &&
-             data.userId == request.auth.uid &&
-             data.name is string && data.name.size() <= 100 &&
-             data.craftId is string && data.craftId.size() <= 50 &&
-             data.createdAt is timestamp &&
-             (data.get('phone', '') is string && data.get('phone', '').size() <= 20) &&
-             (data.get('dailyRate', 0) is number) &&
-             (data.get('rating', 0) is number) &&
-             (data.get('isBarakaActive', false) is bool);
+    function isSignedIn() {
+      return request.auth != null;
     }
 
-    function isValidJob(data) {
-      return data.keys().hasAll(['customerId', 'craftId', 'status', 'createdAt']) &&
-             data.customerId == request.auth.uid &&
-             data.craftId is string &&
-             data.status in ['open', 'assigned', 'completed', 'cancelled'] &&
-             data.createdAt is timestamp &&
-             (data.get('isPremium', false) is bool);
-    }
-    
-    function isValidReview(data) {
-      return data.keys().hasAll(['customerId', 'jobId', 'rating', 'createdAt']) &&
-             data.customerId == request.auth.uid &&
-             data.rating is number && data.rating >= 1 && data.rating <= 5 &&
-             data.createdAt is timestamp &&
-             (data.get('voiceReviewUrl', '') is string);
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
     }
 
-    // --- Collections ---
-
-    // 1. Workers
-    match /workers/{workerId} {
-      allow read: if isSignedIn();
-      allow create: if isVerified() && isValidWorker(incoming()) && isValidId(workerId);
-      allow update: if isOwner(existing().userId) && isValidWorker(incoming()) &&
-                    incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'craftId', 'dailyRate', 'location', 'isAvailable', 'isBarakaActive', 'rating', 'reviewsCount', 'voiceProfileUrl']);
-      
-      // Reviews subcollection
-      match /reviews/{reviewId} {
-        allow read: if isSignedIn();
-        allow create: if isVerified() && isValidReview(incoming()) && isValidId(reviewId) &&
-                      exists(/databases/$(database)/documents/jobs/$(incoming().jobId)) &&
-                      get(/databases/$(database)/documents/jobs/$(incoming().jobId)).data.customerId == request.auth.uid;
-      }
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
-    // 2. Jobs
-    match /jobs/{jobId} {
-      // TODO: Improve list security to force proper query filters instead of relying on client-side
+    // --- Users ---
+    match /users/{uid} {
+      allow get: if isSignedIn() && (isOwner(uid) || exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
       allow list: if isSignedIn();
-      allow get: if isSignedIn();
-      allow create: if isVerified() && isValidJob(incoming()) && isValidId(jobId);
-      allow update: if isSignedIn() && (
-        // Case: Customer updates their job (cancel/complete/confirm/add voice)
-        (isOwner(existing().customerId) && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'workerId', 'customerConfirmedCompletion', 'isPremium', 'additionalVoiceUrls'])) ||
-        // Case: Worker assigns themselves to an open job or confirms completion
-        (isVerified() && (
-          (existing().status == 'open' && incoming().status == 'assigned' && incoming().workerId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'workerId'])) ||
-          (existing().workerId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['workerConfirmedCompletion', 'status']))
-        ))
+      allow create: if isOwner(uid);
+      allow update: if isOwner(uid) && (
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['name', 'phone', 'location', 'lat', 'lng', 'geohash', 'isAvailable', 'isBarakaActive', 'voiceProfileUrl', 'craftId', 'fcmToken'])
       );
     }
 
-    // 3. Messages (Subcollection of Jobs)
-    match /jobs/{jobId}/messages/{messageId} {
-      function canAccessJob() {
-        let job = get(/databases/$(database)/documents/jobs/$(jobId)).data;
-        return isOwner(job.customerId) || isOwner(job.workerId);
-      }
-      
-      allow read: if canAccessJob();
-      allow create: if canAccessJob() && incoming().senderId == request.auth.uid && incoming().createdAt == request.time;
+    // --- Requests ---
+    match /requests/{requestId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.customerId == request.auth.uid;
+      allow update: if isSignedIn() && (
+        // Customer assigning a worker
+        (resource.data.customerId == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasAny(['status', 'workerId', 'isPremium'])) ||
+        // Worker confirming completion
+        (resource.data.workerId == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasAny(['status', 'workerConfirmedCompletion']))
+      );
+    }
+
+    // --- Responses ---
+    match /responses/{responseId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn() && (
+        // Customer who owns the request or worker who sent the bid
+        resource.data.workerId == request.auth.uid || 
+        get(/databases/$(database)/documents/requests/$(resource.data.requestId)).data.customerId == request.auth.uid
+      );
+      allow create: if isSignedIn() && request.resource.data.workerId == request.auth.uid;
+      allow update: if isSignedIn() && (
+        // Customer accepting/rejecting
+        get(/databases/$(database)/documents/requests/$(resource.data.requestId)).data.customerId == request.auth.uid ||
+        resource.data.workerId == request.auth.uid
+      );
+    }
+
+    // --- Reviews ---
+    match /reviews/{reviewId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.reviewerId == request.auth.uid;
     }
   }
 }

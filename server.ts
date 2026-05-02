@@ -17,6 +17,11 @@ async function startServer() {
 
   app.use(express.json());
 
+  app.use((req, res, next) => {
+    console.log(`${req.method} ${req.url}`);
+    next();
+  });
+
   // --- API Routes ---
   
   // Create Stripe Checkout Session
@@ -60,16 +65,32 @@ async function startServer() {
   });
 
   // Upload Audio
-  app.post('/api/upload-audio', upload.single('audio'), (req, res) => {
+  app.post('/api/upload-audio', (req, res, next) => {
+    upload.single('audio')(req, res, (err) => {
+      if (err) {
+        console.error('Multer error:', err);
+        return res.status(500).json({ error: 'Multer upload failed' });
+      }
+      next();
+    });
+  }, (req, res) => {
+    console.log('Upload request received');
     if (!req.file) {
+      console.log('No file in request');
       res.status(400).send('No file uploaded.');
       return;
     }
+    console.log('File received:', req.file);
     // Rename to have .webm extension, essential for audio playback
     const oldPath = req.file.path;
     const newPath = req.file.path + '.webm';
-    fs.renameSync(oldPath, newPath);
-    res.json({ url: `/audio/${req.file.filename}.webm` });
+    try {
+        fs.renameSync(oldPath, newPath);
+        res.json({ url: `/audio/${req.file.filename}.webm` });
+    } catch(err) {
+        console.error('File rename error:', err);
+        res.status(500).json({ error: 'File processing failed' });
+    }
   });
 
   // Serve static audio

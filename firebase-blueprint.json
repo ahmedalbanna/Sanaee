@@ -1,16 +1,14 @@
 {
   "entities": {
-    "Worker": {
-      "title": "Worker",
-      "description": "A professional craftsman offering services.",
+    "User": {
+      "title": "User",
+      "description": "Any user of the platform (Worker or Customer).",
       "type": "object",
       "properties": {
-        "userId": { "type": "string", "description": "Firebase Auth UID" },
+        "uid": { "type": "string" },
         "name": { "type": "string" },
         "phone": { "type": "string" },
-        "voiceProfileUrl": { "type": "string", "description": "URL to the 30s audio intro" },
-        "craftId": { "type": "string", "description": "ID of the craft from constants" },
-        "dailyRate": { "type": "integer" },
+        "role": { "type": "string", "enum": ["customer", "worker"] },
         "location": {
           "type": "object",
           "properties": {
@@ -18,17 +16,24 @@
             "district": { "type": "string" }
           }
         },
-        "rating": { "type": "number" },
+        "lat": { "type": "number" },
+        "lng": { "type": "number" },
+        "geohash": { "type": "string" },
+        "rating": { "type": "number", "description": "Number of golden hammers" },
         "reviewsCount": { "type": "integer" },
-        "isAvailable": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["active", "suspended"] },
+        "isPremium": { "type": "boolean", "description": "For workers: Najm Al-Hara badge" },
+        "voiceFingerprintId": { "type": "string", "description": "Unique voice ID for security" },
+        "voiceProfileUrl": { "type": "string", "description": "Worker audio intro" },
+        "craftId": { "type": "string", "description": "Specialization for workers" },
         "isBarakaActive": { "type": "boolean" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["userId", "name", "craftId"]
+      "required": ["uid", "name", "role", "status"]
     },
-    "JobRequest": {
-      "title": "Job Request",
-      "description": "A request for a craft service from a customer.",
+    "Request": {
+      "title": "Request",
+      "description": "A service request created by a customer.",
       "type": "object",
       "properties": {
         "customerId": { "type": "string" },
@@ -41,62 +46,61 @@
             "district": { "type": "string" }
           }
         },
+        "lat": { "type": "number" },
+        "lng": { "type": "number" },
+        "geohash": { "type": "string" },
         "status": { "type": "string", "enum": ["open", "assigned", "completed", "cancelled"] },
-        "workerId": { "type": "string" },
+        "isPremium": { "type": "boolean", "description": "Urgent/Paid boost" },
         "urgency": { "type": "string", "enum": ["normal", "emergency"] },
-        "isPremium": { "type": "boolean" },
-        "customerConfirmedCompletion": { "type": "boolean" },
-        "workerConfirmedCompletion": { "type": "boolean" },
-        "additionalVoiceUrls": {
-          "type": "array",
-          "items": { "type": "string" }
-        },
+        "workerId": { "type": "string", "description": "Assigned worker" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["customerId", "craftId", "status"]
+      "required": ["customerId", "voiceRequestUrl", "craftId", "status"]
     },
-    "Message": {
-      "title": "Message",
-      "description": "Voice negotiation messages between worker and customer.",
+    "Response": {
+      "title": "Response",
+      "description": "A worker bid/response to a request.",
       "type": "object",
       "properties": {
-        "jobId": { "type": "string" },
-        "senderId": { "type": "string" },
-        "voiceUrl": { "type": "string" },
+        "requestId": { "type": "string" },
+        "workerId": { "type": "string" },
+        "voiceResponseUrl": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "accepted", "rejected"] },
         "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["jobId", "senderId", "voiceUrl"]
+      "required": ["requestId", "workerId", "voiceResponseUrl", "status"]
     },
     "Review": {
       "title": "Review",
-      "description": "A customer review for a worker.",
+      "description": "An audio-visual rating for a job.",
       "type": "object",
       "properties": {
-        "customerId": { "type": "string" },
-        "jobId": { "type": "string" },
+        "reviewerId": { "type": "string" },
+        "revieweeId": { "type": "string" },
+        "requestId": { "type": "string" },
+        "rating": { "type": "number", "description": "1-5 Golden Hammers" },
         "voiceReviewUrl": { "type": "string" },
-        "rating": { "type": "number" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["customerId", "jobId", "rating"]
+      "required": ["reviewerId", "revieweeId", "requestId", "rating"]
     }
   },
   "firestore": {
-    "/workers/{workerId}": {
-      "schema": "Worker",
-      "description": "Individual worker profiles."
+    "/users/{uid}": {
+      "schema": "User",
+      "description": "User profiles for both customers and workers."
     },
-    "/workers/{workerId}/reviews/{reviewId}": {
+    "/requests/{requestId}": {
+      "schema": "Request",
+      "description": "Customer service requests."
+    },
+    "/responses/{responseId}": {
+      "schema": "Response",
+      "description": "Worker bids on requests."
+    },
+    "/reviews/{reviewId}": {
       "schema": "Review",
-      "description": "Audio reviews left by customers for this worker."
-    },
-    "/jobs/{jobId}": {
-      "schema": "JobRequest",
-      "description": "Service requests."
-    },
-    "/jobs/{jobId}/messages/{messageId}": {
-      "schema": "Message",
-      "description": "Negotiation history for a job."
+      "description": "End-of-job reviews."
     }
   }
 }
